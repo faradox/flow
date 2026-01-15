@@ -1,7 +1,119 @@
-{% extends "base.html" %} {% block content %} {% if freeze<1 %}
+{% extends "base.html" %}
+
+{# Homepage Sidebar - shown on desktop in margin, on mobile as hero #}
+{% block sidebar %}
+<aside id="sidebar">
+  {# Welcome section - populated by client-side JS based on localStorage #}
+  <div class="sidebar-welcome" id="sidebar-welcome" style="display: none;">
+    <div class="welcome-message">
+      <span class="welcome-text">Welcome back!</span>
+      <span class="welcome-new-posts"></span>
+    </div>
+  </div>
+
+  {# Popular section - JS renders shuffled selection from pool #}
+  {% if popular_posts %}
+  <div class="sidebar-popular" id="sidebar-popular">
+    <h4>Popular</h4>
+    <ul id="popular-list"></ul>
+    <script type="application/json" id="popular-posts-data">{{ popular_posts | tojson }}</script>
+  </div>
+  {% else %}
+  {# Dev/preview mode: async load from API #}
+  <div class="sidebar-popular" id="sidebar-popular">
+    <h4>Popular</h4>
+    <ul id="popular-list-dynamic">
+      <li class="loading-placeholder">Loading...</li>
+    </ul>
+  </div>
+  {% endif %}
+
+  {# Got a tip? section #}
+  <div class="sidebar-tip" id="sidebar-tip">
+    <h4>Got a tip?</h4>
+    <div class="tip-form" id="tip-form">
+      <textarea 
+        id="tip-textarea" 
+        placeholder="Share a link, idea, or feedback..."
+        rows="3"
+      ></textarea>
+      <button type="button" id="tip-submit" class="tip-submit-btn" style="display: none;">
+        Send Tip →
+      </button>
+    </div>
+    <div class="tip-thanks" id="tip-thanks" style="display: none;">
+      <span class="tip-thanks-icon">✓</span>
+      <span class="tip-thanks-text">Thanks for your tip!</span>
+    </div>
+  </div>
+</aside>
+{% endblock sidebar %}
+
+{% block content %} {% if freeze<1 %}
 <div id="edit_container">
+	<div id="editor_wrapper">
 	<div id="text_area" class="editable"></div>
-	<button id="submit_btn" type="button">Post</button>
+		<div id="editor_placeholder">What's on your mind?</div>
+	</div>
+	<div id="editor_buttons">
+		<button id="submit_btn" type="button">
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<path d="M22 2L11 13"></path>
+				<path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
+			</svg>
+			Post
+		</button>
+
+		<div id="schedule_picker">
+			<button id="schedule_btn" type="button" title="Schedule post for later">
+				<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<circle cx="12" cy="12" r="10"></circle>
+					<polyline points="12 6 12 12 16 14"></polyline>
+				</svg>
+				<span id="schedule_label">Now</span>
+			</button>
+			<div id="schedule_dropdown" class="schedule-dropdown-hidden">
+				<div class="schedule-header">Schedule post for:</div>
+				<div class="schedule-presets">
+					<button type="button" class="schedule-preset" data-offset="0">Now</button>
+					<button type="button" class="schedule-preset" data-offset="1">Tomorrow</button>
+					<button type="button" class="schedule-preset" data-offset="2">+2 days</button>
+					<button type="button" class="schedule-preset" data-offset="3">+3 days</button>
+					<button type="button" class="schedule-preset" data-offset="7">+1 week</button>
+				</div>
+				<div class="schedule-custom">
+					<label>Custom date & time:</label>
+					<input type="datetime-local" id="schedule_datetime" />
+				</div>
+				<div class="schedule-actions">
+					<button type="button" id="schedule_clear">Clear</button>
+					<button type="button" id="schedule_apply">Apply</button>
+				</div>
+			</div>
+		</div>
+
+		<button id="related_btn" type="button" title="Find related posts (Cmd+Shift+R)">
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+				<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+			</svg>
+			Related
+		</button>
+	</div>
+</div>
+
+<!-- Related Posts Side Panel -->
+<div id="related_panel" class="related-panel-hidden">
+	<div class="related-panel-header">
+		<h3>Related Posts</h3>
+		<span id="related_count"></span>
+		<button id="related_close" title="Close (Esc)">&times;</button>
+	</div>
+	<div id="related_results">
+		<div class="related-loading">
+			<img src="{{ request.url_for('static', path='img/loading.gif') }}" alt="Loading..." width="40" />
+		</div>
+	</div>
 </div>
 
 {% endif %} {% with pages=pages, showBanner=True, showFeed=False %} {% include

@@ -13,7 +13,7 @@ from app.settings import settings
 from app.routes import router
 from app.content import ContentManager
 from app.generator import StaticSiteGenerator
-from app.uploader import FTPUploader
+from app.uploader import FTPUploader, RsyncUploader
 
 # Configure logging
 logging.basicConfig(
@@ -57,9 +57,12 @@ content_manager = ContentManager(settings.content_dir)
 @app.on_event("startup")
 async def startup_event():
     """Start file monitoring on app startup"""
-    # Start the file monitoring task
-    asyncio.create_task(content_manager.start_monitoring())
-    # logger.info("Started content file monitoring")
+    if settings.enable_file_monitoring:
+        # Start the file monitoring task
+        asyncio.create_task(content_manager.start_monitoring())
+        logger.info("Started content file monitoring")
+    else:
+        logger.info("File monitoring disabled")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -75,6 +78,7 @@ static_generator = StaticSiteGenerator(
 )
 
 ftp_uploader = FTPUploader(settings)
+rsync_uploader = RsyncUploader(settings)
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -83,18 +87,45 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 upload_path = Path(settings.local_upload_path)
 app.mount("/upload", StaticFiles(directory=upload_path), name="upload")
 
-# Set up templates
+# Set up templates (include analytics templates)
+from jinja2 import ChoiceLoader, FileSystemLoader
 templates = Jinja2Templates(directory="app/templates")
+# Add analytics templates directory to the loader
+templates.env.loader = ChoiceLoader([
+    FileSystemLoader("app/templates"),
+    FileSystemLoader("app/analytics/templates"),
+])
+
+# Add custom Jinja filters for SEO and image handling
+from app.utils import extract_all_images, get_content_stats
+
+templates.env.filters['extract_images'] = lambda html: extract_all_images(html, settings.site_url)
+templates.env.filters['content_stats'] = get_content_stats
 
 # Make core components available to routes
 app.state.content_manager = content_manager
 app.state.static_generator = static_generator
 app.state.ftp_uploader = ftp_uploader
+app.state.rsync_uploader = rsync_uploader
 app.state.templates = templates
 app.state.settings = settings
 
 # Include routes
 app.include_router(router)
+
+# Include analytics routes (optional - only if configured)
+try:
+    from app.analytics import is_analytics_enabled, get_analytics_router
+    if is_analytics_enabled():
+        app.include_router(get_analytics_router())
+        logger.info("Analytics module enabled")
+    else:
+        # Still include routes for dashboard access even without live Matomo
+        # This allows viewing cached/historical data
+        app.include_router(get_analytics_router())
+        logger.info("Analytics module loaded (Matomo not configured - using cached data only)")
+except ImportError as e:
+    logger.debug(f"Analytics module not available: {e}")
 
 # Register multiple exception handlers
 @app.exception_handler(StarletteHTTPException)

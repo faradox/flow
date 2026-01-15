@@ -4,13 +4,92 @@ from ftplib import FTP
 from pathlib import Path
 import hashlib
 from typing import List, Tuple
-import pickle
-import shutil
 import os
+import subprocess
 import logging
+from app.cache import get_cache
 
 
 logger = logging.getLogger(__name__)
+
+
+class RsyncUploader:
+    """Upload site using rsync over SSH - much faster than FTP for incremental updates"""
+    
+    def __init__(self, settings):
+        self.settings = settings
+        self.build_dir = Path(settings.local_build_path)
+    
+    async def upload_site(self, local_dir: Path = None):
+        """Upload site using rsync"""
+        local_dir = local_dir or self.build_dir
+        
+        if not self.settings.rsync_host or not self.settings.rsync_user:
+            logger.error("rsync_host and rsync_user must be configured in settings")
+            raise ValueError("rsync settings not configured")
+        
+        if not self.settings.rsync_remote_path:
+            logger.error("rsync_remote_path must be configured in settings")
+            raise ValueError("rsync_remote_path not configured")
+        
+        # Build rsync command
+        source = str(local_dir.resolve()) + "/"
+        dest = f"{self.settings.rsync_user}@{self.settings.rsync_host}:{self.settings.rsync_remote_path}"
+        
+        cmd = [
+            "rsync",
+            "-avz",           # archive, verbose, compress
+            "--progress",     # show progress
+            "--stats",        # show summary stats
+            "--exclude=static/upload/",  # NEVER delete uploaded media!
+            "--exclude=static/upload",   # Both with and without trailing slash
+        ]
+        
+        # Add delete flag if enabled (--delete-after ensures all uploads complete before any deletes)
+        if self.settings.rsync_delete:
+            cmd.append("--delete-after")
+        
+        # Add SSH key if specified
+        if self.settings.rsync_ssh_key:
+            ssh_key = os.path.expanduser(self.settings.rsync_ssh_key)
+            cmd.extend(["-e", f"ssh -i {ssh_key}"])
+        
+        cmd.extend([source, dest])
+        
+        logger.info(f"Starting rsync upload to {dest}")
+        logger.info(f"Command: {' '.join(cmd)}")
+        
+        try:
+            # Run rsync with real-time output
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+            
+            # Stream output to logger
+            for line in process.stdout:
+                line = line.strip()
+                if line:
+                    logger.info(f"rsync: {line}")
+            
+            # Wait for completion
+            return_code = process.wait()
+            
+            if return_code == 0:
+                logger.info("rsync upload completed successfully")
+            else:
+                logger.error(f"rsync failed with return code {return_code}")
+                raise RuntimeError(f"rsync failed with return code {return_code}")
+                
+        except FileNotFoundError:
+            logger.error("rsync command not found. Please install rsync.")
+            raise
+        except Exception as e:
+            logger.error(f"rsync upload failed: {e}")
+            raise
 
 class FTPUploader:
     def __init__(self, settings):
@@ -18,23 +97,13 @@ class FTPUploader:
         # Use proper build path from settings
         self.build_dir = Path(settings.local_build_path)
         self.upload_dir = Path(settings.local_upload_path)
-        self.cache_dir = Path("cache")
-        self.cache_file = self.cache_dir / "filecache.pickle"
-        self.cache_dir.mkdir(exist_ok=True)
-        self.file_cache = self._load_cache()
+        # Use shared SQLite cache
+        self.cache = get_cache()
         # logger.debug(f"FTP Uploader initialized with build_dir: {self.build_dir}, upload_dir: {self.upload_dir}")
 
-    def _load_cache(self) -> dict:
-        """Load file cache from disk"""
-        if self.cache_file.exists():
-            with open(self.cache_file, "rb") as f:
-                return pickle.load(f)
-        return {}
-
     def _save_cache(self):
-        """Save file cache to disk"""
-        with open(self.cache_file, "wb") as f:
-            pickle.dump(self.file_cache, f)
+        """No-op: SQLite cache auto-saves on each operation"""
+        pass
 
     def _get_file_hash(self, path: Path) -> str:
         """Calculate MD5 hash of file"""
@@ -53,16 +122,18 @@ class FTPUploader:
             if path.is_file():
                 try:
                     file_hash = self._get_file_hash(path)
-                    if str(path) not in self.file_cache or self.file_cache[str(path)] != file_hash:
+                    cache_key = str(path)
+                    if cache_key not in self.cache or self.cache.get(cache_key) != file_hash:
                         changed_files.append(path)
-                        self.file_cache[str(path)] = file_hash
+                        self.cache.set(cache_key, file_hash)
                         logger.debug(f"Found changed file: {path}")
                 except Exception as e:
                     logger.error(f"Error hashing file {path}: {e}")
             elif path.is_dir():
-                if str(path) not in self.file_cache:
+                cache_key = str(path)
+                if cache_key not in self.cache:
                     changed_dirs.append(path)
-                    self.file_cache[str(path)] = "dir"
+                    self.cache.set(cache_key, "dir")
                     logger.debug(f"Found new directory: {path}")
 
         return changed_files, changed_dirs
@@ -188,21 +259,12 @@ class FTPUploader:
     
     def delete_build_files(self, path: str, affected_tags: set = None):
         """Mark files for regeneration without deleting them"""
-        # Create build directory reference
-        build_path = self.build_dir
-
         if affected_tags:
             # Just remove from cache so they'll be regenerated
             for tag in affected_tags:
-                cache_key = f"tag:{tag}"
-                if cache_key in self.file_cache:
-                    del self.file_cache[cache_key]
-                
+                self.cache.delete(f"tag:{tag}")
                 # Remove archive cache entries
-                archive_tag_prefix = f"tag_archives:{tag}"
-                keys_to_remove = [k for k in self.file_cache if k.startswith(archive_tag_prefix)]
-                for key in keys_to_remove:
-                    del self.file_cache[key]
+                self.cache.delete_prefix(f"tag_archives:{tag}")
 
         # Remove cache entries for general site files
         general_files = [
@@ -215,12 +277,7 @@ class FTPUploader:
         
         for file_path in general_files:
             if file_path:
-                cache_key = f"page.html:{file_path}"
-                if cache_key in self.file_cache:
-                    del self.file_cache[cache_key]
+                self.cache.delete(f"page.html:{file_path}")
                 
         # Clear archive cache entries
-        archive_prefix = "archive:"
-        keys_to_remove = [k for k in self.file_cache if k.startswith(archive_prefix)]
-        for key in keys_to_remove:
-            del self.file_cache[key]
+        self.cache.delete_prefix("archive:")

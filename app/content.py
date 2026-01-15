@@ -11,8 +11,58 @@ import asyncio
 import time
 import markdown2
 import re  # Add regex for pattern matching
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+import threading
+import queue
+import signal
+import sys
+import os
 
 logger = logging.getLogger(__name__)
+
+def add_image_loading_hints(html: str) -> str:
+    """
+    Add loading hints to images for better LCP performance:
+    - First image: fetchpriority="high" + loading="eager" (LCP candidate)
+    - Subsequent images: loading="lazy"
+    """
+    image_count = [0]  # Use list to allow modification in nested function
+    
+    def add_loading_attr(match):
+        img_tag = match.group(0)
+        image_count[0] += 1
+        
+        # Skip if already has loading attribute
+        if 'loading=' in img_tag.lower():
+            # For first image, ensure it has fetchpriority if not present
+            if image_count[0] == 1 and 'fetchpriority=' not in img_tag.lower():
+                # Remove loading="lazy" if present and add high priority
+                img_tag = re.sub(r'\s*loading=["\']lazy["\']', '', img_tag, flags=re.IGNORECASE)
+                if img_tag.endswith('/>'):
+                    return img_tag[:-2] + ' fetchpriority="high" loading="eager" />'
+                elif img_tag.endswith('>'):
+                    return img_tag[:-1] + ' fetchpriority="high" loading="eager">'
+            return img_tag
+        
+        # First image gets high priority for LCP
+        if image_count[0] == 1:
+            attrs = ' fetchpriority="high" loading="eager"'
+        else:
+            attrs = ' loading="lazy"'
+        
+        # Add attributes before the closing > or />
+        if img_tag.endswith('/>'):
+            return img_tag[:-2] + attrs + ' />'
+        elif img_tag.endswith('>'):
+            return img_tag[:-1] + attrs + '>'
+        return img_tag
+    
+    return re.sub(r'<img\s[^>]*>', add_loading_attr, html, flags=re.IGNORECASE)
+
+
+# Keep old function name as alias for backwards compatibility
+add_lazy_loading = add_image_loading_hints
 
 # Helper function to preprocess Markdown content
 def preprocess_markdown(content: str) -> str:
@@ -116,6 +166,9 @@ class Page(BaseModel):
                 # Treat content as raw HTML
                 processed_html = post.content
             
+            # Add lazy loading to all images
+            processed_html = add_lazy_loading(processed_html)
+            
             return cls(
                 metadata=metadata,
                 content=post.content,
@@ -126,128 +179,185 @@ class Page(BaseModel):
             logger.error(f"Error loading file {file_path}: {str(e)}")
             raise
 
+class ContentFileHandler(FileSystemEventHandler):
+    """Handles filesystem events for content files"""
+    def __init__(self, callback_queue: queue.Queue):
+        self.callback_queue = callback_queue
+        self.file_hashes: Dict[str, str] = {}
+        self._last_mtimes: Dict[str, float] = {}
+        
+    def _get_file_hash(self, file_path: Path) -> str:
+        """Calculate MD5 hash of file content efficiently"""
+        hash_md5 = hashlib.md5()
+        try:
+            with open(file_path, 'rb') as f:
+                # Read in chunks to avoid loading entire file into memory
+                for chunk in iter(lambda: f.read(4096), b""):
+                    hash_md5.update(chunk)
+            return hash_md5.hexdigest()
+        except Exception as e:
+            logger.error(f"Error hashing file {file_path}: {e}")
+            return ""
+    
+    def _should_process_file(self, file_path: Path) -> bool:
+        """Check if file should be processed (markdown files only)"""
+        return file_path.suffix.lower() == '.md' and file_path.exists()
+    
+    def _process_file_change(self, file_path: Path, event_type: str):
+        """Process a file change event"""
+        if not self._should_process_file(file_path):
+            return
+            
+        str_path = str(file_path)
+        try:
+            if event_type == 'deleted':
+                # Handle deleted files
+                if str_path in self.file_hashes:
+                    del self.file_hashes[str_path]
+                    del self._last_mtimes[str_path]
+                    self.callback_queue.put(('deleted', str_path))
+            else:
+                # Handle created/modified files
+                current_mtime = file_path.stat().st_mtime
+                last_mtime = self._last_mtimes.get(str_path, 0)
+                
+                # Only process if mtime changed
+                if current_mtime != last_mtime:
+                    current_hash = self._get_file_hash(file_path)
+                    last_hash = self.file_hashes.get(str_path)
+                    
+                    # Only process if hash changed (content actually changed)
+                    if current_hash != last_hash:
+                        self.file_hashes[str_path] = current_hash
+                        self._last_mtimes[str_path] = current_mtime
+                        self.callback_queue.put(('changed', str_path))
+                    else:
+                        # Update mtime even if hash didn't change
+                        self._last_mtimes[str_path] = current_mtime
+                        
+        except Exception as e:
+            logger.error(f"Error processing file change for {file_path}: {e}")
+    
+    def on_modified(self, event):
+        if not event.is_directory:
+            self._process_file_change(Path(event.src_path), 'modified')
+    
+    def on_created(self, event):
+        if not event.is_directory:
+            self._process_file_change(Path(event.src_path), 'created')
+    
+    def on_deleted(self, event):
+        if not event.is_directory:
+            self._process_file_change(Path(event.src_path), 'deleted')
+    
+    def on_moved(self, event):
+        if not event.is_directory:
+            # Handle as deletion of old path and creation of new path
+            self._process_file_change(Path(event.src_path), 'deleted')
+            self._process_file_change(Path(event.dest_path), 'created')
+
 class FileMonitor:
-    """Handles file system monitoring for content files"""
+    """Handles file system monitoring for content files using watchdog"""
     def __init__(self, content_dir: Path, batch_size: int = 1000):
         self.content_dir = content_dir
         self.batch_size = batch_size
-        self.file_hashes: Dict[str, str] = {}
-        self._last_mtimes: Dict[str, float] = {}
-        self._dir_mtimes: Dict[str, float] = {}
         self.is_monitoring = False
+        self.observer = None
+        self.event_handler = None
+        self.callback_queue = queue.Queue()
+        self.callback = None
+        self._setup_signal_handlers()
 
-    def _get_file_hash(self, file_path: Path) -> str:
-        """Calculate MD5 hash of file content"""
-        with open(file_path, 'rb') as f:
-            return hashlib.md5(f.read()).hexdigest()
-
-    def _get_directory_mtime(self, dir_path: Path) -> float:
-        """Get the latest modification time of a directory and its immediate children"""
-        try:
-            dir_mtime = dir_path.stat().st_mtime
-            return max(
-                dir_mtime,
-                max((p.stat().st_mtime for p in dir_path.iterdir()), default=dir_mtime)
-            )
-        except Exception as e:
-            logger.error(f"Error getting directory mtime: {e}")
-            return 0
-
-    def check_for_changes(self) -> Set[str]:
-        """Check for changes using directory-level monitoring and batch processing"""
-        changed_files = set()
-        try:
-            # First check directory-level changes
-            current_dir_mtimes = {}
-            dirs_to_check = set()
+    def _setup_signal_handlers(self):
+        """Setup signal handlers for graceful shutdown"""
+        def signal_handler(signum, frame):
+            logger.info(f"Received signal {signum}, shutting down gracefully...")
+            self.stop()
+            # Force exit if graceful shutdown takes too long
+            import threading
+            def force_exit():
+                import time
+                time.sleep(3)
+                logger.warning("Force exiting due to hanging shutdown...")
+                os._exit(1)
             
-            # Check main content directory first
-            main_dir_mtime = self._get_directory_mtime(self.content_dir)
-            if main_dir_mtime != self._dir_mtimes.get(str(self.content_dir), 0):
-                dirs_to_check.add(self.content_dir)
-            current_dir_mtimes[str(self.content_dir)] = main_dir_mtime
-
-            # Check subdirectories
-            for dir_path in self.content_dir.glob("**/"):
-                dir_str = str(dir_path)
-                current_mtime = self._get_directory_mtime(dir_path)
-                current_dir_mtimes[dir_str] = current_mtime
-                
-                if current_mtime != self._dir_mtimes.get(dir_str, 0):
-                    dirs_to_check.add(dir_path)
-
-            # Only process directories that have changed
-            if dirs_to_check:
-                # Get all current files in changed directories
-                current_files = set()
-                for dir_path in dirs_to_check:
-                    current_files.update(dir_path.glob("*.md"))
-                
-                # Process files in batches
-                for i in range(0, len(current_files), self.batch_size):
-                    batch = list(current_files)[i:i + self.batch_size]
-                    for file_path in batch:
-                        str_path = str(file_path)
-                        try:
-                            mtime = file_path.stat().st_mtime
-                            
-                            if mtime != self._last_mtimes.get(str_path, 0):
-                                current_hash = self._get_file_hash(file_path)
-                                
-                                if current_hash != self.file_hashes.get(str_path):
-                                    changed_files.add(str_path)
-                                    self.file_hashes[str_path] = current_hash
-                                
-                                self._last_mtimes[str_path] = mtime
-                        
-                        except FileNotFoundError:
-                            # Handle deleted files
-                            if str_path in self.file_hashes:
-                                changed_files.add(str_path)
-                                del self.file_hashes[str_path]
-                                del self._last_mtimes[str_path]
-
-            # Update directory mtimes
-            self._dir_mtimes = current_dir_mtimes
-
-        except Exception as e:
-            logger.error(f"Error during file monitoring: {str(e)}")
+            threading.Thread(target=force_exit, daemon=True).start()
+            sys.exit(0)
         
-        return changed_files
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+
+    def _initialize_file_cache(self):
+        """Initialize file cache with current file states"""
+        logger.info("Initializing file cache...")
+        file_count = 0
+        for file_path in self.content_dir.glob("**/*.md"):
+            try:
+                str_path = str(file_path)
+                mtime = file_path.stat().st_mtime
+                self.event_handler._last_mtimes[str_path] = mtime
+                # Don't compute hash during initialization - only when files change
+                file_count += 1
+            except Exception as e:
+                logger.error(f"Error initializing cache for {file_path}: {e}")
+        
+        logger.info(f"Initialized cache for {file_count} files")
 
     async def start(self, callback, check_interval: float = 5.0):
-        """Start monitoring with adaptive intervals based on scale"""
+        """Start monitoring using watchdog filesystem events"""
         self.is_monitoring = True
+        self.callback = callback
         
-        # Adjust interval based on content size
-        file_count = len(list(self.content_dir.glob("**/*.md")))
-        if file_count > 10000:
-            check_interval = max(check_interval, 6.0)
-        elif file_count > 5000:
-            check_interval = max(check_interval, 5.0)
+        # Create event handler
+        self.event_handler = ContentFileHandler(self.callback_queue)
         
-        # logger.info(f"Starting file monitor with {check_interval}s interval for {file_count} files")
+        # Initialize file cache
+        self._initialize_file_cache()
         
-        error_count = 0
+        # Create observer
+        self.observer = Observer()
+        self.observer.schedule(self.event_handler, str(self.content_dir), recursive=True)
+        # Make observer thread non-daemon so it can be properly stopped
+        self.observer.daemon = False
+        
+        # Start observer
+        self.observer.start()
+        logger.info(f"Started watchdog file monitoring for {self.content_dir}")
+        
+        # Process events from queue
         while self.is_monitoring:
             try:
-                changed_files = self.check_for_changes()
-                if changed_files:
-                    # logger.info(f"Detected changes in {len(changed_files)} files")
+                # Wait for events with timeout
+                try:
+                    event_type, file_path = self.callback_queue.get(timeout=1.0)
+                    changed_files = {file_path}
+                    
+                    if event_type == 'deleted':
+                        logger.info(f"File deleted: {file_path}")
+                    else:
+                        logger.info(f"File changed: {file_path}")
+                    
                     await callback(changed_files)
-                error_count = 0
-                
+                    
+                except queue.Empty:
+                    # No events, continue
+                    continue
+                    
             except Exception as e:
-                error_count += 1
-                logger.error(f"Error during file monitoring (attempt {error_count}): {str(e)}")
-                await asyncio.sleep(min(check_interval * (2 ** error_count), 60.0))
-                continue
-
-            await asyncio.sleep(check_interval)
+                logger.error(f"Error processing file events: {e}")
+                await asyncio.sleep(1.0)
 
     def stop(self):
         """Stop monitoring content files"""
         self.is_monitoring = False
+        if self.observer:
+            self.observer.stop()
+            # Wait for observer to stop with timeout to avoid hanging
+            try:
+                self.observer.join(timeout=2.0)  # Wait max 2 seconds
+            except:
+                pass  # Ignore any errors during shutdown
+            logger.info("Stopped watchdog file monitoring")
 
 
 class ContentManager:
@@ -258,6 +368,8 @@ class ContentManager:
             raise FileNotFoundError(f"Content directory not found: {self.content_dir}")
         
         self.pages: Dict[str, Page] = {}
+        self.page_mtimes: Dict[str, float] = {}  # Track file modification times
+        self.page_paths: Dict[str, Path] = {}  # Map page path to file path
         self.monitor = FileMonitor(self.content_dir)
         self.load_all_pages()
 
@@ -270,11 +382,15 @@ class ContentManager:
                     # Update/add file
                     page = Page.from_file(path)
                     self.pages[page.path] = page
+                    self.page_paths[page.path] = path
+                    self.page_mtimes[page.path] = path.stat().st_mtime
                 else:
                     # Remove file
                     page_path = path.stem
                     if page_path in self.pages:
                         del self.pages[page_path]
+                        self.page_paths.pop(page_path, None)
+                        self.page_mtimes.pop(page_path, None)
             except Exception as e:
                 logger.error(f"Error handling change in {file_path}: {e}")
 
@@ -295,22 +411,71 @@ class ContentManager:
             try:
                 page = Page.from_file(file_path)
                 self.pages[page.path] = page
-                # Initialize monitor's hash
-                self.monitor.file_hashes[str(file_path)] = self.monitor._get_file_hash(file_path)
+                self.page_paths[page.path] = file_path
+                self.page_mtimes[page.path] = file_path.stat().st_mtime
             except Exception as e:
                 logger.error(f"Failed to load {file_path}: {str(e)}")
 
     def get_page(self, path: str) -> Optional[Page]:
-        """Get a specific page by path"""
-        return self.pages.get(path)
+        """Get a specific page by path, reloading if file was modified externally"""
+        # Check if page exists in cache
+        if path in self.pages:
+            file_path = self.page_paths.get(path)
+            if file_path and file_path.exists():
+                try:
+                    current_mtime = file_path.stat().st_mtime
+                    cached_mtime = self.page_mtimes.get(path, 0)
+                    
+                    # Reload if file was modified
+                    if current_mtime > cached_mtime:
+                        logger.debug(f"Reloading modified page: {path}")
+                        page = Page.from_file(file_path)
+                        self.pages[path] = page
+                        self.page_mtimes[path] = current_mtime
+                except Exception as e:
+                    logger.error(f"Error checking/reloading page {path}: {e}")
+            
+            return self.pages.get(path)
+        
+        # Page not in cache - try to find it on disk (new file created externally)
+        possible_paths = [
+            self.content_dir / f"{path}.md",
+            self.content_dir / path / "index.md",
+        ]
+        # Also search recursively for the file
+        for file_path in self.content_dir.glob(f"**/{path}.md"):
+            possible_paths.insert(0, file_path)
+            break
+        
+        for file_path in possible_paths:
+            if file_path.exists():
+                try:
+                    page = Page.from_file(file_path)
+                    self.pages[page.path] = page
+                    self.page_paths[page.path] = file_path
+                    self.page_mtimes[page.path] = file_path.stat().st_mtime
+                    logger.info(f"Loaded new page from disk: {path}")
+                    return page
+                except Exception as e:
+                    logger.error(f"Error loading new page {path}: {e}")
+        
+        return None
 
-    def get_pages_by_status(self, status: str, username: Optional[str] = None) -> List[Page]:
-        """Get all pages with a specific status"""
+    def get_pages_by_status(self, status: str, username: Optional[str] = None, include_future: bool = False) -> List[Page]:
+        """Get all pages with a specific status.
+        
+        By default, excludes posts with future dates (scheduled posts).
+        Set include_future=True to include all posts regardless of date.
+        """
+        now = datetime.now()
         pages = []
         for page in self.pages.values():
             if page.metadata.status != status:
                 continue
             if username and page.metadata.author != username:
+                continue
+            # Filter out future-dated posts unless explicitly requested
+            if not include_future and page.metadata.date > now:
                 continue
             pages.append(page)
         return sorted(pages, key=lambda p: p.metadata.date, reverse=True)
@@ -343,5 +508,8 @@ class ContentManager:
         # Save the file
         file_path.write_text(markdown)
 
-        # Reload the saved page
-        self.pages[path] = Page.from_file(file_path)
+        # Reload the saved page and update tracking
+        page = Page.from_file(file_path)
+        self.pages[path] = page
+        self.page_paths[path] = file_path
+        self.page_mtimes[path] = file_path.stat().st_mtime

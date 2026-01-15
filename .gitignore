@@ -12,3 +12,20 @@ pages/
 .history/
 content/p/
 app/static/log.json
+*.rdb
+
+# Analytics data (user-specific experiments, goals, and agent logs)
+app/analytics/data/experiments/*.md
+app/analytics/data/goals/*.md
+app/analytics/data/agent-log.md
+app/analytics/data/distribution-kit.md
+app/analytics/data/network-kit.md
+# But keep the template/instruction files
+!app/analytics/data/experiments/_template.md
+!app/analytics/data/goals/_template.md
+# Note: agent.md, *.example files are tracked as templates for other users
+
+# Sidebar config (user-specific preferences)
+app/data/sidebar-popular.txt
+# But keep the example template
+!app/data/sidebar-popular.txt.example

@@ -22,10 +22,27 @@ function isMobile() {
 }
 
 function isBot() {
-	const botPattern =
-		"(googlebot/|bot|Googlebot-Mobile|Googlebot-Image|Google favicon|Mediapartners-Google|bingbot|slurp|java|wget|curl|Commons-HttpClient|Python-urllib|libwww|httpunit|nutch|phpcrawl|msnbot|jyxobot|FAST-WebCrawler|FAST Enterprise Crawler|biglotron|teoma|convera|seekbot|gigablast|exabot|ngbot|ia_archiver|GingerCrawler|webmon |httrack|webcrawler|grub.org|UsineNouvelleCrawler|antibot|netresearchserver|speedy|fluffy|bibnum.bnf|findlink|msrbot|panscient|yacybot|AISearchBot|IOI|ips-agent|tagoobot|MJ12bot|dotbot|woriobot|yanga|buzzbot|mlbot|yandexbot|purebot|Linguee Bot|Voyager|CyberPatrol|voilabot|baiduspider|citeseerxbot|spbot|twengabot|postrank|turnitinbot|scribdbot|page2rss|sitebot|linkdex|Adidxbot|blekkobot|ezooms|dotbot|Mail.RU_Bot|discobot|heritrix|findthatfile|europarchive.org|NerdByNature.Bot|sistrix crawler|ahrefsbot|Aboundex|domaincrawler|wbsearchbot|summify|ccbot|edisterbot|seznambot|ec2linkfinder|gslfbot|aihitbot|intelium_bot|facebookexternalhit|yeti|RetrevoPageAnalyzer|lb-spider|sogou|lssbot|careerbot|wotbox|wocbot|ichiro|DuckDuckBot|lssrocketcrawler|drupact|webcompanycrawler|acoonbot|openindexspider|gnam gnam spider|web-archive-net.com.bot|backlinkcrawler|coccoc|integromedb|content crawler spider|toplistbot|seokicks-robot|it2media-domain-crawler|ip-web-crawler.com|siteexplorer.info|elisabot|proximic|changedetection|blexbot|arabot|WeSEE:Search|niki-bot|CrystalSemanticsBot|rogerbot|360Spider|psbot|InterfaxScanBot|CC Metadata Scaper)";
-	const re = new RegExp(botPattern, "i");
-	return re.test(navigator.userAgent);
+	// Comprehensive bot detection - includes search engines, AI crawlers, social previews, etc.
+	const botPatterns = [
+		// Major search engines
+		'googlebot', 'bingbot', 'yandexbot', 'baiduspider', 'duckduckbot', 'slurp', 'sogou',
+		// AI/LLM crawlers
+		'gptbot', 'chatgpt', 'claude-web', 'anthropic', 'ccbot', 'perplexitybot', 'cohere-ai',
+		// SEO tools
+		'ahrefsbot', 'semrushbot', 'mj12bot', 'dotbot', 'rogerbot', 'screaming frog',
+		// Social media previews
+		'facebookexternalhit', 'twitterbot', 'linkedinbot', 'slackbot', 'telegrambot', 'whatsapp', 'discordbot',
+		// Archive/research
+		'ia_archiver', 'archive.org_bot', 'heritrix',
+		// Generic patterns
+		'bot', 'spider', 'crawl', 'wget', 'curl', 'python-urllib', 'python-requests', 'libwww',
+		'httpunit', 'nutch', 'phpcrawl', 'httrack', 'java/', 'perl', 'ruby',
+		// Other known bots
+		'applebot', 'bytespider', 'petalbot', '360spider', 'seznambot', 'exabot',
+		'gigablast', 'teoma', 'blexbot', 'linkdex', 'msnbot'
+	];
+	const pattern = new RegExp(botPatterns.join('|'), 'i');
+	return pattern.test(navigator.userAgent);
 }
 
 // Image Gallery class
@@ -54,7 +71,7 @@ class ImageGallery {
             width: 100%;
             height: 100%;
             background: rgba(0, 0, 0, 0.9);
-            z-index: 1002;
+            z-index: 100002;
             justify-content: center;
             align-items: center;
         `;
@@ -179,6 +196,9 @@ function getRelativeTimeString(date) {
 }
 
 function formatDate() {
+	// Check if we're on a detail page (single post view)
+	const isDetailPage = window.location.pathname.startsWith('/p/');
+	
 	if (!isBot()) {
 		document.querySelectorAll(".post_date_title").forEach((el) => {
 			el.style.display = "none";
@@ -189,8 +209,35 @@ function formatDate() {
 		.querySelectorAll(".dt-published:not([data-formatted])")
 		.forEach((dateElem) => {
 			const date = dateElem.getAttribute("datetime");
-			const formatted = getRelativeTimeString(date);
-			dateElem.textContent = formatted;
+			if (!date) return;
+			
+			const dateObj = new Date(date);
+			
+			if (isDetailPage) {
+				// On detail pages, show full date
+				const fullDate = dateObj.toLocaleDateString('en-US', {
+					weekday: 'long',
+					year: 'numeric',
+					month: 'long',
+					day: 'numeric'
+				});
+				dateElem.textContent = fullDate;
+			} else {
+				// On list pages, show relative time
+				const formatted = getRelativeTimeString(date);
+				dateElem.textContent = formatted;
+				
+				// Add absolute date as title for hover tooltip
+				const absoluteDate = dateObj.toLocaleString('en-US', {
+					year: 'numeric',
+					month: 'short',
+					day: 'numeric',
+					hour: '2-digit',
+					minute: '2-digit'
+				});
+				dateElem.setAttribute("title", absoluteDate);
+			}
+			
 			dateElem.setAttribute("data-formatted", "true");
 		});
 }
@@ -201,71 +248,131 @@ function formatContentHeight(element) {
 		!element.classList.contains("content_open")
 	) {
 		element.classList.add("content_open");
-		const images = element.querySelectorAll("img");
+		
+		// Check and apply collapse based on current state
+		applyCollapseIfNeeded(element);
+		
+		// Use ResizeObserver to catch ANY height changes (images loading, flow-embeds 
+		// rendering, lazy content, iframes, videos, etc.) - more robust than specific listeners
+		if (typeof ResizeObserver !== 'undefined') {
+			let lastHeight = element.offsetHeight;
+			const resizeObserver = new ResizeObserver((entries) => {
+				for (const entry of entries) {
+					const newHeight = entry.contentRect.height;
+					// Only re-check if height increased significantly (avoid minor fluctuations)
+					if (newHeight > lastHeight + 50) {
+						lastHeight = newHeight;
+						applyCollapseIfNeeded(element);
+					}
+				}
+			});
+			
+			resizeObserver.observe(element);
+			
+			// Disconnect after 15 seconds - by then all content should be loaded
+			// Also disconnect if collapse was applied (no need to keep watching)
+			const cleanup = () => {
+				resizeObserver.disconnect();
+			};
+			
+			setTimeout(cleanup, 15000);
+			
+			// Store cleanup function so we can disconnect when collapse is applied
+			element._resizeCleanup = cleanup;
+		} else {
+			// Fallback for older browsers: use image load events
+			const images = element.querySelectorAll("img");
+			images.forEach(img => {
+				if (!img.complete) {
+					img.addEventListener("load", () => {
+						applyCollapseIfNeeded(element);
+					}, { once: true });
+				}
+			});
+		}
+	}
+}
 
-		if (element.offsetHeight > 640 || images.length > 10) {
-			element.classList.add("content_shortend");
-			const initialHeight = element.offsetHeight + "px";
+// Helper function to apply collapse if element exceeds height threshold
+function applyCollapseIfNeeded(element) {
+	// Skip if already collapsed
+	if (element.classList.contains("content_shortend")) return;
+	
+	const images = element.querySelectorAll("img");
+	const flowEmbeds = element.querySelectorAll("flow-embed");
+	
+	// Also count flow-embeds as "heavy" content that warrants collapse
+	const hasHeavyContent = flowEmbeds.length > 3;
+	
+	if (element.offsetHeight > 740 || images.length > 10 || hasHeavyContent) {
+		element.classList.add("content_shortend");
+		const initialHeight = element.offsetHeight + "px";
+		
+		// Clean up ResizeObserver since we've applied the collapse
+		if (element._resizeCleanup) {
+			element._resizeCleanup();
+			delete element._resizeCleanup;
+		}
+		element.style.height = initialHeight;
+
+		const showmore = document.createElement("div");
+		showmore.className = "showmore";
+		element.parentNode.insertBefore(showmore, element);
+
+		const btnShowmore = document.createElement("div");
+		btnShowmore.className = "btn_showmore";
+		btnShowmore.textContent = "Read More ▼";
+		element.parentNode.insertBefore(btnShowmore, element.nextSibling);
+
+		const expandContent = () => {
+			const fadeSpeed = 250;
+			element.style.height = "auto";
+			const fullHeight = element.offsetHeight;
 			element.style.height = initialHeight;
 
-			const showmore = document.createElement("div");
-			showmore.className = "showmore";
-			element.parentNode.insertBefore(showmore, element);
+			let duration = (fullHeight - parseInt(initialHeight)) / 10;
+			duration = Math.min(duration, 150);
+			duration += fadeSpeed;
 
-			const btnShowmore = document.createElement("div");
-			btnShowmore.className = "btn_showmore";
-			btnShowmore.textContent = "Read More ▼";
-			element.parentNode.insertBefore(btnShowmore, element.nextSibling);
+			showmore.style.transition = `opacity ${fadeSpeed}ms`;
+			showmore.style.opacity = "0";
+			btnShowmore.style.transition = `opacity ${fadeSpeed}ms`;
+			btnShowmore.style.opacity = "0";
 
-			const expandContent = () => {
-				const fadeSpeed = 250;
+			element.style.transition = `height ${duration}ms`;
+			element.style.height = fullHeight + "px";
+
+			setTimeout(() => {
+				showmore.remove();
+				btnShowmore.remove();
 				element.style.height = "auto";
-				const fullHeight = element.offsetHeight;
-				element.style.height = initialHeight;
+				element.style.transition = "";
+				element.classList.remove("content_shortend");
 
-				let duration = (fullHeight - parseInt(initialHeight)) / 10;
-				duration = Math.min(duration, 150);
-				duration += fadeSpeed;
+				// Re-run formatMedia to ensure all images have proper handlers
+				formatMedia();
 
-				showmore.style.transition = `opacity ${fadeSpeed}ms`;
-				showmore.style.opacity = "0";
-				btnShowmore.style.transition = `opacity ${fadeSpeed}ms`;
-				btnShowmore.style.opacity = "0";
+				const thispage = element.parentNode
+					.querySelector(".post_date")
+					.getAttribute("href");
+				const thispagetitle = element.parentNode.querySelector(
+					".post_date_title .post_date"
+				).textContent;
+				
+				// Only use analytics if _paq is defined
+				if (typeof _paq !== 'undefined') {
+					_paq.push(["trackEvent", "postopen", thispage]);
+					// Check if href is already absolute URL (static site) or relative (dev)
+					const url = thispage.startsWith('http') ? thispage : window.location.origin + thispage;
+					_paq.push(["setDocumentTitle", thispagetitle]);
+					_paq.push(["setCustomUrl", url]);
+					_paq.push(["trackPageView"]);
+				}
+			}, duration);
+		};
 
-				element.style.transition = `height ${duration}ms`;
-				element.style.height = fullHeight + "px";
-
-				setTimeout(() => {
-					showmore.remove();
-					btnShowmore.remove();
-					element.style.height = "auto";
-					element.style.transition = "";
-					element.classList.remove("content_shortend");
-
-					// Re-run formatMedia to ensure all images have proper handlers
-					formatMedia();
-
-					const thispage = element.parentNode
-						.querySelector(".post_date")
-						.getAttribute("href");
-					const thispagetitle = element.parentNode.querySelector(
-						".post_date_title .post_date"
-					).textContent;
-					
-					// Only use analytics if _paq is defined
-					if (typeof _paq !== 'undefined') {
-						_paq.push(["trackEvent", "postopen", thispage]);
-						const url = window.location.origin + thispage;
-						_paq.push(["setDocumentTitle", thispagetitle]);
-						_paq.push(["setCustomUrl", url]);
-						_paq.push(["trackPageView"]);
-					}
-				}, duration);
-			};
-
-			showmore.addEventListener("click", expandContent);
-			btnShowmore.addEventListener("click", expandContent);
-		}
+		showmore.addEventListener("click", expandContent);
+		btnShowmore.addEventListener("click", expandContent);
 	}
 }
 
@@ -372,7 +479,6 @@ async function loadPageFromURL(url) {
 				_paq.push(["setDocumentTitle", url]);
 				_paq.push(["setCustomUrl", url]);
 				_paq.push(["setGenerationTimeMs", Date.now() - timeItTookToLoadPage]);
-				_paq.push(["enableLinkTracking"]);
 				_paq.push(["trackPageView"]);
 			}
 
@@ -412,6 +518,9 @@ async function loadPageFromURL(url) {
 			// Call additional formatting functions if they exist
 			if (typeof repost === "function") repost();
 			if (typeof editpost === "function") editpost();
+			
+			// Initialize flow-embeds in newly loaded content
+			initFlowEmbeds();
 
 			loading = false;
 		} else {
@@ -502,6 +611,11 @@ function infiniteScroll() {
 		}
 	}
 
+	// Mobile gets larger threshold and longer debounce for stability
+	const mobile = isMobile();
+	const threshold = mobile ? 1500 : 1000; // Trigger earlier on mobile to feel smoother
+	const debounceMs = mobile ? 250 : 150;  // Longer debounce on mobile to reduce load
+
 	// Add scroll handler with debounce
 	let scrollTimeout;
 	window.addEventListener("scroll", () => {
@@ -509,12 +623,11 @@ function infiniteScroll() {
 		scrollTimeout = setTimeout(() => {
 			const scrollPosition = window.innerHeight + window.scrollY;
 			const totalHeight = document.documentElement.scrollHeight;
-			const threshold = 1000; // Trigger when within 1000px of bottom
 
 			if (scrollPosition >= totalHeight - threshold) {
 				loadPage();
 			}
-		}, 150);
+		}, debounceMs);
 	});
 }
 
@@ -531,7 +644,7 @@ galleryStyles.textContent = `
         padding: 20px;
         cursor: pointer;
         font-size: 24px;
-        z-index: 1003;
+        z-index: 100001;
     }
     .gallery-nav.prev { left: 20px; }
     .gallery-nav.next { right: 20px; }
@@ -544,7 +657,7 @@ galleryStyles.textContent = `
         color: white;
         font-size: 40px;
         cursor: pointer;
-        z-index: 1003;
+        z-index: 100001;
     }
     .gallery-image-container {
         display: flex;
@@ -560,10 +673,119 @@ galleryStyles.textContent = `
 `;
 document.head.appendChild(galleryStyles);
 
+// Lazy load MathJax only when math content is detected
+function lazyLoadMathJax() {
+	// Check if page contains LaTeX math notation
+	const content = document.body.innerHTML;
+	const hasMath = /\\\(.*?\\\)|\\\[.*?\\\]|\$\$.*?\$\$|\$[^$]+\$/s.test(content);
+	
+	if (hasMath && !window.MathJax) {
+		console.log('Math content detected, loading MathJax...');
+		
+		// Configure MathJax before loading
+		window.MathJax = {
+			tex: {
+				inlineMath: [['\\(', '\\)'], ['$', '$']],
+				displayMath: [['\\[', '\\]'], ['$$', '$$']]
+			},
+			startup: {
+				ready: () => {
+					console.log('MathJax loaded and ready');
+					MathJax.startup.defaultReady();
+				}
+			}
+		};
+		
+		// Get site path prefix
+		const siteElement = document.getElementById('site');
+		let pathPrefix = '';
+		if (siteElement && siteElement.dataset.sitePathPrefix) {
+			pathPrefix = siteElement.dataset.sitePathPrefix.replace(/\/$/, '');
+		}
+		
+		// Load MathJax script
+		const script = document.createElement('script');
+		script.src = `${pathPrefix}/static/js/vendor/mathjax/es5/tex-mml-chtml.js`;
+		script.async = true;
+		document.head.appendChild(script);
+	}
+}
+
 // Initialize on DOM ready
 document.addEventListener("DOMContentLoaded", () => {
 	// Initialize gallery first
 	gallery = new ImageGallery();
+
+	// Smart sticky header: natural scroll at top, then hide/show on direction
+	const header = document.getElementById("top-container");
+	if (header) {
+		let lastScrollY = 0;
+		let headerHeight = header.offsetHeight;
+		const scrollDelta = 10;
+		let inNaturalZone = true;
+		let returningToTop = false;
+		
+		window.addEventListener("scroll", () => {
+			const currentScrollY = window.scrollY;
+			
+			// In the natural zone (near top of page)
+			if (currentScrollY <= headerHeight) {
+				
+				// Coming back from smart sticky with header visible?
+				if (!inNaturalZone && !header.classList.contains("header-hidden")) {
+					returningToTop = true;
+				}
+				
+				// If returning to top, wait until we're actually at the top
+				if (returningToTop) {
+					if (currentScrollY < 5) {
+						// At the top - reset everything cleanly
+						returningToTop = false;
+						header.classList.remove("scrolled", "header-hidden", "header-animate");
+						header.style.transform = "";
+					}
+					// Keep header as-is while returning
+					inNaturalZone = true;
+					lastScrollY = currentScrollY;
+					return;
+				}
+				
+				// Normal natural scroll - header moves with content
+				header.classList.remove("scrolled", "header-hidden", "header-animate");
+				header.style.transform = `translateY(-${currentScrollY}px)`;
+				lastScrollY = currentScrollY;
+				inNaturalZone = true;
+				return;
+			}
+			
+			// Just exited natural zone - ensure header is hidden, no animation yet
+			if (inNaturalZone) {
+				header.style.transform = "";
+				header.classList.add("header-hidden");
+				header.classList.add("scrolled");
+				// Enable animations after a tick
+				requestAnimationFrame(() => {
+					header.classList.add("header-animate");
+				});
+				inNaturalZone = false;
+				lastScrollY = currentScrollY;
+				return;
+			}
+			
+			// Past header height - smart sticky behavior with animations
+			const scrollDiff = currentScrollY - lastScrollY;
+			
+			if (scrollDiff > scrollDelta) {
+				// Scrolling down - hide header
+				header.classList.add("header-hidden");
+				lastScrollY = currentScrollY;
+			} else if (scrollDiff < -scrollDelta) {
+				// Scrolling up - show header
+				header.classList.remove("header-hidden");
+				lastScrollY = currentScrollY;
+			}
+		}, { passive: true });
+	}
 
 	const loadingElement = document.getElementById("loading");
 	if (loadingElement) {
@@ -572,7 +794,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
 	formatDate();
 
-	if (!isMobile() && !isBot()) {
+	// Enable infinite scroll for all devices, but not for bots
+	if (!isBot()) {
 		infiniteScroll();
 	}
 
@@ -580,6 +803,9 @@ document.addEventListener("DOMContentLoaded", () => {
 	setTimeout(formatContent, 200);
 
 	initTagSearch();
+	
+	// Lazy load MathJax if needed
+	lazyLoadMathJax();
 });
 
 // Analytics setup
@@ -607,3 +833,732 @@ function loadAnalyticsScript() {
 
 // Call the function to load the analytics script
 loadAnalyticsScript();
+
+// ============================================
+// Flow Embed - Render <flow-embed> as quote cards
+// ============================================
+function initFlowEmbeds() {
+	const embeds = document.querySelectorAll('flow-embed:not([data-initialized])');
+	
+	embeds.forEach(embed => {
+		embed.setAttribute('data-initialized', 'true');
+		
+		const url = embed.getAttribute('url');
+		if (!url) {
+			embed.innerHTML = '<span class="flow-embed-error">Missing URL</span>';
+			return;
+		}
+		
+		// Show loading state
+		embed.innerHTML = '<div class="flow-embed-loading">Loading...</div>';
+		
+		// Fetch the page and extract content
+		fetchAndRenderEmbed(embed, url);
+	});
+}
+
+async function fetchAndRenderEmbed(embed, url) {
+	try {
+		// Extract the page path from URL for fetching
+		// URL might be full (https://samim.io/p/slug/) or relative (/p/slug/)
+		let fetchUrl = url;
+		
+		// If we're on localhost/dev, convert absolute URLs to relative for same-origin fetch
+		const currentOrigin = window.location.origin;
+		const urlObj = new URL(url, currentOrigin);
+		
+		// Extract just the path for fetching (works on any origin)
+		if (urlObj.pathname.startsWith('/p/')) {
+			fetchUrl = urlObj.pathname;
+		}
+		
+		const response = await fetch(fetchUrl);
+		
+		if (!response.ok) {
+			throw new Error(`Failed to fetch: ${response.status}`);
+		}
+		
+		const html = await response.text();
+		const parser = new DOMParser();
+		const doc = parser.parseFromString(html, 'text/html');
+		
+		// Extract content from the page
+		const entry = doc.querySelector('.h-entry');
+		let title = doc.querySelector('title')?.textContent?.trim() || 
+		              doc.querySelector('.post_date_title')?.textContent?.trim() ||
+		              'Untitled';
+		// Strip site name suffix from title (e.g., "Post Title - SiteName" -> "Post Title")
+		// Get site name from meta tag, falling back to extracting from current page title
+		const siteName = document.querySelector('meta[name="site-name"]')?.content || 
+		                 document.title.split(' - ').pop();
+		if (siteName) {
+			const suffixPattern = new RegExp(`\\s*-\\s*${siteName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+			title = title.replace(suffixPattern, '');
+		}
+		const dateElem = doc.querySelector('.dt-published');
+		const date = dateElem?.getAttribute('datetime') || '';
+		const formattedDate = date ? getRelativeTimeString(date) : '';
+		
+		// Get excerpt from content
+		const contentElem = doc.querySelector('.e-content');
+		let excerpt = '';
+		if (contentElem) {
+			// Strip HTML and get first ~140 chars
+			const textContent = contentElem.textContent?.trim() || '';
+			excerpt = textContent.substring(0, 140);
+			if (textContent.length > 140) excerpt += '...';
+		}
+		
+		// Get first image if available
+		const firstImage = doc.querySelector('.e-content img');
+		const imageUrl = firstImage?.src || '';
+		
+		// Get domain for display
+		const domain = new URL(url, window.location.origin).hostname;
+		
+		// Build the card HTML
+		const hasImage = imageUrl && !imageUrl.startsWith('data:');
+		const cardClass = hasImage ? 'flow-embed-card' : 'flow-embed-card no-image';
+		
+		embed.innerHTML = `
+			<a href="${url}" class="${cardClass}" target="_blank" rel="noopener">
+				<div class="flow-embed-card-inner">
+					${hasImage ? `
+						<div class="flow-embed-image">
+							<img src="${imageUrl}" alt="" loading="lazy">
+						</div>
+					` : ''}
+					<div class="flow-embed-content">
+						<div class="flow-embed-meta">
+							<span class="flow-embed-domain">${domain}</span>
+							${formattedDate ? `<span class="flow-embed-date">${formattedDate}</span>` : ''}
+						</div>
+						<div class="flow-embed-title">${escapeHtml(title)}</div>
+						${excerpt ? `<div class="flow-embed-excerpt">${escapeHtml(excerpt)}</div>` : ''}
+					</div>
+				</div>
+			</a>
+		`;
+		
+	} catch (error) {
+		console.error('Flow embed error:', error);
+		// Show error state with fallback link
+		embed.innerHTML = `<a href="${url}" class="flow-embed-error" target="_blank" rel="noopener">
+			⚠️ Could not load preview: ${url}
+		</a>`;
+	}
+}
+
+function escapeHtml(text) {
+	const div = document.createElement('div');
+	div.textContent = text;
+	return div.innerHTML;
+}
+
+// Run on page load and after dynamic content loads
+document.addEventListener('DOMContentLoaded', initFlowEmbeds);
+
+// Also expose globally so it can be called after content changes
+window.initFlowEmbeds = initFlowEmbeds;
+
+// ============================================
+// Content Discovery - "More in [Tag]" + "Newest Stories"
+// ============================================
+function initContentDiscovery() {
+	const discoveryContainer = document.getElementById('content-discovery');
+	if (!discoveryContainer) return;
+	
+	const currentPath = discoveryContainer.dataset.currentPath;
+	
+	// Extract tags from JSON-LD on the page (search all JSON-LD scripts for one with keywords)
+	const jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
+	let tags = [];
+	for (const script of jsonLdScripts) {
+		try {
+			const jsonLd = JSON.parse(script.textContent);
+			if (jsonLd.keywords) {
+				tags = jsonLd.keywords.split(', ').filter(t => t.trim());
+				break; // Found keywords, stop searching
+			}
+		} catch (e) {
+			// Skip invalid JSON-LD scripts
+		}
+	}
+	
+	// Fetch RSS for top stories first
+	const rssPromise = fetch('/rss.xml')
+		.then(r => r.ok ? r.text() : null)
+		.then(xml => xml ? parseRSS(xml, currentPath) : [])
+		.catch(() => []);
+	
+	// Fetch tag pages with pagination support
+	const tagsToFetch = tags.slice(0, 3);
+	const tagPostsPromise = fetchTagPostsWithPagination(tagsToFetch, currentPath, 6);
+	
+	Promise.all([rssPromise, tagPostsPromise]).then(([topStories, tagPosts]) => {
+		// Build mixed "More in Tags" section
+		const mixedPosts = getMixedTagPosts(tagPosts, 6);
+		
+		// Render the discovery section
+		renderDiscovery(discoveryContainer, tags, mixedPosts, topStories);
+	});
+}
+
+// Fetch posts from tag pages, auto-paginating until we have enough
+async function fetchTagPostsWithPagination(tags, excludePath, minPostsPerTag) {
+	const tagPosts = new Map();
+	
+	for (const tag of tags) {
+		const posts = [];
+		const seenHrefs = new Set();
+		let page = -1; // -1 means main tag page, 0+ means archive pages
+		const maxPages = 3; // Don't fetch more than 3 pages per tag
+		
+		while (posts.length < minPostsPerTag && page < maxPages) {
+			let url;
+			if (page === -1) {
+				url = `/tag/${encodeURIComponent(tag)}/`;
+			} else {
+				url = `/archive/tag/${encodeURIComponent(tag)}_${page}.html`;
+			}
+			
+			try {
+				const response = await fetch(url);
+				if (!response.ok) break;
+				
+				const html = await response.text();
+				const pagePosts = parseTagPage(html, excludePath);
+				
+				// Add unique posts
+				let addedAny = false;
+				for (const post of pagePosts) {
+					if (!seenHrefs.has(post.href)) {
+						seenHrefs.add(post.href);
+						posts.push(post);
+						addedAny = true;
+					}
+				}
+				
+				// If no new posts found, stop pagination
+				if (!addedAny && page >= 0) break;
+				
+			} catch (e) {
+				break;
+			}
+			
+			page++;
+		}
+		
+		if (posts.length > 0) {
+			tagPosts.set(tag, posts);
+		}
+	}
+	
+	return tagPosts;
+}
+
+function parseTagPage(html, excludePath) {
+	const parser = new DOMParser();
+	const doc = parser.parseFromString(html, 'text/html');
+	const posts = [];
+	
+	doc.querySelectorAll('.h-entry').forEach(entry => {
+		const titleLink = entry.querySelector('.post_date_title a');
+		const dateElem = entry.querySelector('.dt-published');
+		const contentElem = entry.querySelector('.e-content');
+		const firstImg = entry.querySelector('.e-content img');
+		
+		if (!titleLink) return;
+		
+		const href = titleLink.getAttribute('href');
+		// Skip current post
+		if (href && href.includes(excludePath)) return;
+		
+		const title = titleLink.textContent?.trim() || 'Untitled';
+		const date = dateElem?.getAttribute('datetime') || '';
+		const imageUrl = firstImg?.src || '';
+		
+		posts.push({ title, href, date, imageUrl });
+	});
+	
+	return posts;
+}
+
+function parseRSS(xml, excludePath) {
+	const parser = new DOMParser();
+	const doc = parser.parseFromString(xml, 'text/xml');
+	const posts = [];
+	
+	doc.querySelectorAll('item').forEach(item => {
+		const title = item.querySelector('title')?.textContent || 'Untitled';
+		const link = item.querySelector('link')?.textContent || '';
+		const pubDate = item.querySelector('pubDate')?.textContent || '';
+		
+		// Skip current post
+		if (link && link.includes(excludePath)) return;
+		
+		posts.push({ 
+			title, 
+			href: link, 
+			date: pubDate ? new Date(pubDate).toISOString() : ''
+		});
+	});
+	
+	return posts.slice(0, 6); // Top 6 stories
+}
+
+// Fisher-Yates shuffle
+function shuffleArray(array) {
+	for (let i = array.length - 1; i > 0; i--) {
+		const j = Math.floor(Math.random() * (i + 1));
+		[array[i], array[j]] = [array[j], array[i]];
+	}
+	return array;
+}
+
+function getMixedTagPosts(tagPosts, maxPosts) {
+	// Collect all posts from all tags
+	const allPosts = [];
+	const usedHrefs = new Set();
+	
+	for (const [tag, posts] of tagPosts.entries()) {
+		for (const post of posts) {
+			if (!usedHrefs.has(post.href)) {
+				usedHrefs.add(post.href);
+				allPosts.push({ ...post, tag });
+			}
+		}
+	}
+	
+	// Shuffle for variety on each page load
+	shuffleArray(allPosts);
+	
+	return allPosts.slice(0, maxPosts);
+}
+
+function renderDiscovery(container, tags, tagPosts, topStories) {
+	// If nothing to show, hide container
+	if (tagPosts.length === 0 && topStories.length === 0) {
+		container.style.display = 'none';
+		return;
+	}
+	
+	let html = '<div class="discovery-wrapper">';
+	
+	// "More in Tags" section
+	if (tagPosts.length > 0) {
+		// Build title showing tags - use original tags from the page
+		const allTags = tags.length > 0 ? tags : [...new Set(tagPosts.map(p => p.tag))];
+		let tagDisplay;
+		if (allTags.length === 1) {
+			tagDisplay = `#${allTags[0]}`;
+		} else if (allTags.length === 2) {
+			tagDisplay = `#${allTags[0]} & #${allTags[1]}`;
+		} else {
+			// 3+ tags: show first 2, then "+ N more"
+			const remaining = allTags.length - 2;
+			tagDisplay = `#${allTags[0]}, #${allTags[1]} & ${remaining} more`;
+		}
+		
+		html += `
+			<div class="discovery-section discovery-tags">
+				<h3 class="discovery-heading">More in ${tagDisplay}</h3>
+				<div class="discovery-grid">
+		`;
+		
+		tagPosts.forEach(post => {
+			const hasImage = post.imageUrl && !post.imageUrl.startsWith('data:');
+			html += `
+				<a href="${post.href}" class="discovery-card ${hasImage ? '' : 'no-image'}">
+					<div class="discovery-card-image">
+						${hasImage ? `<img src="${post.imageUrl}" alt="" loading="lazy">` : '<div class="discovery-card-placeholder"></div>'}
+					</div>
+					<div class="discovery-card-title">${escapeHtml(post.title)}</div>
+				</a>
+			`;
+		});
+		
+		html += `
+				</div>
+			</div>
+		`;
+	}
+	
+	// "Newest Stories" section
+	if (topStories.length > 0) {
+		html += `
+			<div class="discovery-section discovery-top">
+				<h3 class="discovery-heading">Newest Stories</h3>
+				<ul class="discovery-list">
+		`;
+		
+		topStories.forEach(story => {
+			const timeAgo = story.date ? getRelativeTimeString(story.date) : '';
+			html += `
+				<li class="discovery-list-item">
+					<a href="${story.href}">
+						${timeAgo ? `<span class="discovery-date">${timeAgo}</span>` : ''}
+						${escapeHtml(story.title)}
+					</a>
+				</li>
+			`;
+		});
+		
+		html += `
+				</ul>
+			</div>
+		`;
+	}
+	
+	html += '</div>';
+	container.innerHTML = html;
+}
+
+// Initialize on DOMContentLoaded
+document.addEventListener('DOMContentLoaded', initContentDiscovery);
+
+// ============================================
+// Sidebar: Welcome Message + Random Post + Popular
+// ============================================
+
+function initSidebar() {
+	initWelcomeMessage();
+	initRandomPost();
+	initTipForm();
+	
+	// Check which mode we're in
+	const popularDataEl = document.getElementById('popular-posts-data');
+	const dynamicList = document.getElementById('popular-list-dynamic');
+	
+	if (popularDataEl) {
+		// Static mode: JSON pool embedded, shuffle and render
+		initPopularFromPool();
+	} else if (dynamicList) {
+		// Dev mode: fetch from API
+		initPopularDev();
+	} else {
+		// No popular posts data - still need to init mobile sidebar
+		initMobileSidebar();
+	}
+}
+
+// Static mode: Render shuffled selection from embedded JSON pool
+function initPopularFromPool() {
+	const dataEl = document.getElementById('popular-posts-data');
+	const listEl = document.getElementById('popular-list');
+	if (!dataEl || !listEl) return;
+	
+	try {
+		const pool = JSON.parse(dataEl.textContent);
+		if (!pool || pool.length === 0) {
+			document.getElementById('sidebar-popular')?.remove();
+			return;
+		}
+		
+		// Shuffle the pool
+		const shuffled = shuffleArray([...pool]);
+		
+		// Take first 12 (SIDEBAR_POPULAR_LIMIT)
+		const selected = shuffled.slice(0, 12);
+		
+		// Render
+		listEl.innerHTML = selected.map(post => {
+			const title = escapeHtml(truncateText(post.title || post.path, 55));
+			const tagsHtml = post.tags && post.tags.length > 0
+				? `<span class="sidebar-tags">${post.tags.slice(0, 2).map(tag => 
+					`<a href="/tag/${encodeURIComponent(tag)}/">#${escapeHtml(tag)}</a>`
+				).join(' ')}</span>`
+				: '';
+			return `<li><a href="/p/${post.path}/">${title}</a>${tagsHtml}</li>`;
+		}).join('');
+		
+		// Now apply mobile sidebar logic
+		initMobileSidebar();
+		
+	} catch (e) {
+		console.error('Failed to parse popular posts data:', e);
+	}
+}
+
+// Fisher-Yates shuffle
+function shuffleArray(array) {
+	for (let i = array.length - 1; i > 0; i--) {
+		const j = Math.floor(Math.random() * (i + 1));
+		[array[i], array[j]] = [array[j], array[i]];
+	}
+	return array;
+}
+
+// Truncate text to max length
+function truncateText(text, maxLength) {
+	if (!text || text.length <= maxLength) return text;
+	return text.substring(0, maxLength - 3) + '...';
+}
+
+// Mobile: Move sidebar after 5th post, limit visible popular posts
+function initMobileSidebar() {
+	// Only when sidebar is hidden (< 1420px)
+	if (window.innerWidth >= 1420) return;
+	
+	const sidebar = document.getElementById('sidebar');
+	const postsList = document.getElementById('posts');
+	if (!sidebar || !postsList) return;
+	
+	// Limit visible popular posts to 5 on mobile (do this first, before positioning)
+	limitPopularPosts(sidebar);
+	
+	// Try to position sidebar after 5th post
+	const tryPositionSidebar = () => {
+		const posts = Array.from(postsList.querySelectorAll('li.h-entry'));
+		
+		// Ideal: insert after 5th post
+		if (posts.length >= 5 && posts[4]) {
+			posts[4].after(sidebar);
+			sidebar.classList.add('sidebar-inline-mobile');
+			return true; // Success
+		}
+		return false; // Not enough posts yet
+	};
+	
+	// Try immediately
+	if (tryPositionSidebar()) return;
+	
+	// Not enough posts yet - watch for more posts via MutationObserver
+	const observer = new MutationObserver((mutations) => {
+		if (tryPositionSidebar()) {
+			observer.disconnect(); // Stop watching once positioned
+		}
+	});
+	
+	observer.observe(postsList, { childList: true });
+	
+	// Fallback: if after 3 seconds we still don't have 5 posts, show after whatever we have
+	setTimeout(() => {
+		if (!sidebar.classList.contains('sidebar-inline-mobile')) {
+			const posts = Array.from(postsList.querySelectorAll('li.h-entry'));
+			if (posts.length > 0) {
+				const insertAt = Math.min(4, posts.length - 1);
+				posts[insertAt].after(sidebar);
+				sidebar.classList.add('sidebar-inline-mobile');
+			}
+			observer.disconnect();
+		}
+	}, 3000);
+}
+
+// Helper: Limit popular posts to 5 with "Show more" button
+function limitPopularPosts(sidebar) {
+	const popularList = sidebar.querySelector('.sidebar-popular ul');
+	if (!popularList) return;
+	
+	// Wait a bit for popular posts to load (they load async)
+	const tryLimit = () => {
+		const popularItems = popularList.querySelectorAll('li:not(.loading-placeholder)');
+		if (popularItems.length <= 5) return false; // Not enough yet or already limited
+		
+		// Check if already limited
+		if (sidebar.querySelector('.popular-show-more')) return true;
+		
+		// Hide posts 6+
+		popularItems.forEach((item, i) => {
+			if (i >= 5) item.classList.add('popular-hidden-mobile');
+		});
+		
+		// Add "Show more" button
+		const showMoreBtn = document.createElement('button');
+		showMoreBtn.className = 'popular-show-more';
+		showMoreBtn.textContent = 'Show more';
+		showMoreBtn.onclick = () => {
+			popularItems.forEach(item => item.classList.remove('popular-hidden-mobile'));
+			showMoreBtn.remove();
+		};
+		popularList.after(showMoreBtn);
+		return true;
+	};
+	
+	// Try immediately
+	if (tryLimit()) return;
+	
+	// Watch for popular posts to load
+	const observer = new MutationObserver(() => {
+		if (tryLimit()) {
+			observer.disconnect();
+		}
+	});
+	observer.observe(popularList, { childList: true });
+	
+	// Stop watching after 5 seconds
+	setTimeout(() => observer.disconnect(), 5000);
+}
+
+// Welcome message - simple version (no posts.json fetch)
+function initWelcomeMessage() {
+	const welcomeEl = document.getElementById('sidebar-welcome');
+	if (!welcomeEl) return;
+	
+	const STORAGE_KEY = 'samim_last_visit';
+	const now = new Date();
+	const lastVisitStr = localStorage.getItem(STORAGE_KEY);
+	
+	if (!lastVisitStr) {
+		// First visit - store timestamp, don't show welcome
+		localStorage.setItem(STORAGE_KEY, now.toISOString());
+		return;
+	}
+	
+	// Return visitor - just show welcome, no post count
+	const welcomeText = welcomeEl.querySelector('.welcome-text');
+	const newPostsEl = welcomeEl.querySelector('.welcome-new-posts');
+	
+	if (welcomeText) {
+		welcomeText.textContent = 'Welcome back!';
+	}
+	
+	// Hide the new posts element (feature removed for performance)
+	if (newPostsEl) {
+		newPostsEl.style.display = 'none';
+	}
+	
+	// Show the welcome section
+	welcomeEl.style.display = 'block';
+	
+	// Update last visit timestamp
+	localStorage.setItem(STORAGE_KEY, now.toISOString());
+}
+
+// Random post button - uses lightweight posts-urls.json with caching
+let cachedPostUrls = null;
+
+function initRandomPost() {
+	const randomBtns = document.querySelectorAll('#random-post-nav, #random-post-btn');
+	if (randomBtns.length === 0) return;
+	
+	randomBtns.forEach(btn => {
+		btn.addEventListener('click', async (e) => {
+			e.preventDefault();
+			await navigateToRandomPost();
+		});
+	});
+}
+
+async function navigateToRandomPost() {
+	// Get site path prefix
+	const siteElement = document.getElementById('site');
+	let pathPrefix = '';
+	if (siteElement && siteElement.dataset.sitePathPrefix) {
+		pathPrefix = siteElement.dataset.sitePathPrefix.replace(/\/$/, '');
+	}
+	
+	try {
+		// Use cached URLs if available (instant on repeat clicks)
+		if (!cachedPostUrls) {
+			const response = await fetch(`${pathPrefix}/posts-urls.json`);
+			if (!response.ok) {
+				console.error('Could not load posts index');
+				return;
+			}
+			cachedPostUrls = await response.json();
+		}
+		
+		if (cachedPostUrls.length === 0) return;
+		
+		// Pick a random URL
+		const randomUrl = cachedPostUrls[Math.floor(Math.random() * cachedPostUrls.length)];
+		
+		// Navigate to it
+		window.location.href = randomUrl;
+	} catch (e) {
+		console.error('Random post navigation failed:', e);
+	}
+}
+
+// Dev mode: Load Popular posts via API
+function initPopularDev() {
+	const dynamicList = document.getElementById('popular-list-dynamic');
+	if (!dynamicList) return;
+	
+	// Fetch from analytics API
+	fetch('/analytics/api/popular')
+		.then(r => r.ok ? r.json() : null)
+		.then(data => {
+			if (!data || !data.posts || data.posts.length === 0) {
+				// No data - hide the section
+				const popularSection = document.getElementById('sidebar-popular');
+				if (popularSection) popularSection.style.display = 'none';
+				return;
+			}
+			
+			// Shuffle and take 12 for variety
+			const shuffled = shuffleArray([...data.posts]);
+			const selected = shuffled.slice(0, 12);
+			
+			// Render the posts with tags
+			dynamicList.innerHTML = selected.map(post => {
+				const title = escapeHtml(truncateText(post.title || post.path, 55));
+				const tagsHtml = post.tags && post.tags.length > 0
+					? `<span class="sidebar-tags">${post.tags.slice(0, 2).map(tag => 
+						`<a href="/tag/${encodeURIComponent(tag)}/">#${escapeHtml(tag)}</a>`
+					).join(' ')}</span>`
+					: '';
+				return `<li><a href="/p/${post.path}/">${title}</a>${tagsHtml}</li>`;
+			}).join('');
+			
+			// Now that posts are loaded, apply mobile sidebar logic
+			initMobileSidebar();
+		})
+		.catch(e => {
+			console.warn('Could not load popular posts:', e);
+			const popularSection = document.getElementById('sidebar-popular');
+			if (popularSection) popularSection.style.display = 'none';
+		});
+}
+
+// Initialize sidebar on DOM ready
+document.addEventListener('DOMContentLoaded', initSidebar);
+
+// ============================================
+// Got a Tip? Form
+// ============================================
+function initTipForm() {
+	const textarea = document.getElementById('tip-textarea');
+	const submitBtn = document.getElementById('tip-submit');
+	const tipForm = document.getElementById('tip-form');
+	const tipThanks = document.getElementById('tip-thanks');
+	
+	if (!textarea || !submitBtn) return;
+	
+	// Show/hide submit button based on text content
+	textarea.addEventListener('input', () => {
+		const hasText = textarea.value.trim().length > 0;
+		submitBtn.style.display = hasText ? 'block' : 'none';
+	});
+	
+	// Handle form submission
+	submitBtn.addEventListener('click', () => {
+		const tipText = textarea.value.trim();
+		if (!tipText) return;
+		
+		// Create mailto link with pre-filled content (email obfuscated to deter scrapers)
+		const subject = encodeURIComponent('Tip for samim.io');
+		const body = encodeURIComponent(tipText);
+		const e = ['tip', 'samim', 'io'].join('@').replace('@io', '.io');
+		const mailtoUrl = `mailto:${e}?subject=${subject}&body=${body}`;
+		
+		// Open email client
+		window.location.href = mailtoUrl;
+		
+		// Show thank you message
+		tipForm.style.display = 'none';
+		tipThanks.style.display = 'flex';
+		
+		// Optional: Reset after some time so user can send another tip
+		setTimeout(() => {
+			textarea.value = '';
+			submitBtn.style.display = 'none';
+			tipForm.style.display = 'flex';
+			tipThanks.style.display = 'none';
+		}, 5000);
+	});
+}
+
+// Tip form is initialized via initSidebar()

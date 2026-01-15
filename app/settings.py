@@ -2,7 +2,7 @@
 
 from pydantic_settings import BaseSettings
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set, Optional
 import re
 
 class Settings(BaseSettings):
@@ -22,17 +22,33 @@ class Settings(BaseSettings):
     author_name: str = "samim"
     author_image: str = "https://samim.io/static/upload/A8SKcX4t_400x400.jpg"
     author_twitter: str = "samim"
+    
+    # Newsletter (optional - set to enable newsletter badge in nav)
+    newsletter_url: str = "https://mailchi.mp/4804acffeb6e/samimio"  # e.g., "https://mailchi.mp/xxx/yourlist"
 
     # Server settings
     local_server_port: int = 2323
     local_server_debug: bool = True
+    enable_file_monitoring: bool = False  # Disabled by default to avoid watchdog issues
+    
+    # Build settings
+    build_search_index: bool = False  # Auto-build Pagefind search index (requires Node.js)
+    
+    # Analytics settings (optional - enables analytics dashboard and AI context)
+    # To get your Matomo token: Matomo → Settings → Personal → Security → Auth Tokens
+    matomo_url: str = ""  # e.g., "https://samim.io/MatomoStats/"
+    matomo_site_id: int = 1
+    matomo_token: str = ""  # Your Matomo auth token
+    analytics_cache_hours: int = 1  # How long to cache analytics data
 
-    # Authentication
-    local_server_auth: bool = False
-    local_server_auth_name: str = ""
-    local_server_auth_pass: str = ""
+    # Authentication (set admin_password to enable live mode with login)
+    admin_password: str = ""  # Leave empty for local dev mode, set for live server
+    session_secret: str = "change-this-secret-key-in-production"  # Used to sign session cookies
 
-    # FTP settings
+    # Upload settings
+    upload_method: str = "ftp"  # Options: "ftp" or "rsync"
+    
+    # FTP settings (used when upload_method = "ftp")
     server_ftp_enabled: bool = True
     server_ftp_server: str = "default_ftp_url"
     server_ftp_username: str = "default_user"
@@ -40,11 +56,18 @@ class Settings(BaseSettings):
     server_ftp_path: Path = Path("/public_html/")
     server_ftp_media_path: str = "/public_html/static/upload/"
     server_ftp_media_site_path: str = "https://samim.io/static/upload/"
+    
+    # rsync settings (used when upload_method = "rsync")
+    rsync_host: str = "127.0.0.1"                   # e.g., "samim.io" or IP address
+    rsync_user: str = "ssh_username"                # SSH username
+    rsync_remote_path: str = "/public_html/"        # path to remote directory, e.g., "/var/www/html/" or "/home/user/public_html/"
+    rsync_ssh_key: str = "~/.ssh/id_ed12345"        # path to PRIVATE SSH key
+    rsync_delete: bool = False                      # Delete remote files not in local (keeps remote clean)
 
     # File paths
     local_upload_path: Path = Path("upload/")
     local_build_path: Path = Path("build/")
-    allowed_extensions: Set[str] = {"png", "jpg", "jpeg", "gif", "webp"}
+    allowed_extensions: Set[str] = {"png", "jpg", "jpeg", "gif", "webp", "avif"}
 
     # Asset settings
     content_dir: Path = Path("content/p/")
