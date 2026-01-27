@@ -1,0 +1,83 @@
+x-all: &all
+  DOCKER_NETWORK_NAME: ${DOCKER_NETWORK_NAME:-breathnet}
+  ENVIRONMENT: ${ENVIRONMENT:-production}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  SITE_NAME: ${BLOG_SITE_NAME:-faradox}
+  SITE_URL: ${BLOG_SITE_URL:-https://blog.breathdance.net}
+  SITE_DESCRIPTION: ${BLOG_SITE_DESCRIPTION:-samim.io - blogging, research, projects, ideas}
+  SITE_KEYWORDS: ${BLOG_SITE_KEYWORDS:-["blog","samim"]}
+  SITE_PATH_PREFIX: ${BLOG_SITE_PATH_PREFIX:-/}
+  SITE_FILETYPE: ${BLOG_SITE_FILETYPE:-.md}
+  SITE_SHOWMORE_LENGTH: ${BLOG_SITE_SHOWMORE_LENGTH:-500}
+  SITE_SCROLL_AMOUNT: ${BLOG_SITE_SCROLL_AMOUNT:-20}
+  SITE_FEED_AMOUNT: ${BLOG_SITE_FEED_AMOUNT:-25}
+  AUTHOR: ${BLOG_AUTHOR:-samim}
+  AUTHOR_NAME: ${BLOG_AUTHOR_NAME:-samim}
+  AUTHOR_IMAGE: ${BLOG_AUTHOR_IMAGE:-/home/faradox/breathdance/websites/blog/upload/faradox1.png}
+  AUTHOR_TWITTER: ${BLOG_AUTHOR_TWITTER:-samim}
+  NEWSLETTER_URL: ${BLOG_NEWSLETTER_URL:-https://mailchi.mp/4804acffeb6e/samimio}
+  LOCAL_SERVER_PORT: ${BLOG_LOCAL_SERVER_PORT:-2323}
+  LOCAL_SERVER_DEBUG: ${BLOG_LOCAL_SERVER_DEBUG:-true}
+  ENABLE_FILE_MONITORING: ${BLOG_ENABLE_FILE_MONITORING:-false}
+  BUILD_SEARCH_INDEX: ${BLOG_BUILD_SEARCH_INDEX:-false}
+  MATOMO_URL: ${BLOG_MATOMO_URL:-https://mtm.breathdance.net/}
+  MATOMO_SITE_ID: ${BLOG_MATOMO_SITE_ID:-1}
+  MATOMO_TOKEN: ${BLOG_MATOMO_TOKEN:-}
+  ANALYTICS_CACHE_HOURS: ${BLOG_ANALYTICS_CACHE_HOURS:-1}
+  ADMIN_PASSWORD: ${BLOG_ADMIN_PASSWORD:-}
+  SESSION_SECRET: ${BLOG_SESSION_SECRET:-}
+  UPLOAD_METHOD: ${BLOG_UPLOAD_METHOD:-local}
+  SERVER_FTP_ENABLED: ${BLOG_SERVER_FTP_ENABLED:-false}
+  SERVER_FTP_SERVER: ${BLOG_SERVER_FTP_SERVER:-default_ftp_url}
+  SERVER_FTP_USERNAME: ${BLOG_SERVER_FTP_USERNAME:-default_user}
+  SERVER_FTP_PASSWORD: ${BLOG_SERVER_FTP_PASSWORD:-default_password}
+  SERVER_FTP_PATH: ${BLOG_SERVER_FTP_PATH:-/public_html/}
+  SERVER_FTP_MEDIA_PATH: ${BLOG_SERVER_FTP_MEDIA_PATH:-/public_html/static/upload/}
+  SERVER_FTP_MEDIA_SITE_PATH: ${BLOG_SERVER_FTP_MEDIA_SITE_PATH:-https://samim.io/static/upload/}
+  RSYNC_HOST: ${BLOG_RSYNC_HOST:-127.0.0.1}
+  RSYNC_USER: ${BLOG_RSYNC_USER:-ssh_username}
+  RSYNC_REMOTE_PATH: ${BLOG_RSYNC_REMOTE_PATH:-/public_html/}
+  RSYNC_SSH_KEY: ${BLOG_RSYNC_SSH_KEY:-~/.ssh/id_ed12345}
+  RSYNC_DELETE: ${BLOG_RSYNC_DELETE:-false}
+  LOCAL_UPLOAD_PATH: ${BLOG_LOCAL_UPLOAD_PATH:-upload/}
+  LOCAL_BUILD_PATH: ${BLOG_LOCAL_BUILD_PATH:-build/}
+  ALLOWED_EXTENSIONS: ${BLOG_ALLOWED_EXTENSIONS:-["png","jpg","jpeg","gif","webp","avif"]}
+  CONTENT_DIR: ${BLOG_CONTENT_DIR:-content/p/}
+  TEMPLATES_DIR: ${BLOG_TEMPLATES_DIR:-app/templates}
+  STATIC_DIR: ${BLOG_STATIC_DIR:-app/static}
+
+services:
+  blog:
+    build:
+      context: ./
+      args:
+        UID: ${uid:-1000}
+        GID: ${gid:-1000}
+    image: blog:latest
+    container_name: blog
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${BLOG_LOCAL_SERVER_PORT:-2323}:${BLOG_LOCAL_SERVER_PORT:-2323}"
+    volumes:
+      - ./content:/app/content
+      - ./upload:/app/upload
+      - ./build:/app/build
+      - ./cache:/app/cache
+    environment:
+      <<: [*all]
+      PORT: ${BLOG_LOCAL_SERVER_PORT:-2323}
+      WEB_CONCURRENCY: ${BLOG_WEB_CONCURRENCY:-1}
+      TZ: Europe/Berlin
+    networks:
+      breathnet:
+        ipv4_address: 172.29.5.1
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:${BLOG_LOCAL_SERVER_PORT:-2323}/').read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  breathnet:
+    external: true
+    name: ${DOCKER_NETWORK_NAME:-breathnet}

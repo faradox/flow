@@ -690,9 +690,11 @@ async def publish_site(request: Request, background_tasks: BackgroundTasks):
             if settings.upload_method == "rsync" and settings.rsync_host:
                 # Use rsync (faster)
                 await request.app.state.rsync_uploader.upload_site(Path("build"))
-            elif settings.server_ftp_enabled:
-                # Fallback to FTP
+            elif settings.upload_method == "ftp" and settings.server_ftp_enabled:
+                # Use FTP
                 await request.app.state.ftp_uploader.upload_site(Path("build"))
+            else:
+                logger.info("Skipping remote upload (local only)")
             
             # Write success message to the log file
             write_to_log(json.dumps({"status": "done", "text": "Publishing done!"}))
@@ -772,14 +774,16 @@ async def upload(request: Request, file: UploadFile = File(...)):
         # Construct URL based on whether site is in a subdirectory
         file_url = f"{site_path_prefix}/upload/{filename}"
 
-        # Upload to FTP if enabled
-        if settings.server_ftp_enabled:
-            with ftplib.FTP(settings.server_ftp_server, 
-                           settings.server_ftp_username,
-                           settings.server_ftp_password) as session:
+        # Upload to FTP if enabled and selected
+        if settings.upload_method == "ftp" and settings.server_ftp_enabled:
+            with ftplib.FTP(
+                settings.server_ftp_server,
+                settings.server_ftp_username,
+                settings.server_ftp_password,
+            ) as session:
                 ftp_path = settings.server_ftp_media_path + filename
                 with open(file_path, 'rb') as f:
-                    session.storbinary(f'STOR {ftp_path}', f)
+                    session.storbinary(f"STOR {ftp_path}", f)
                 file_url = settings.server_ftp_media_site_path + filename
                 logger.info(f"Uploaded to FTP: {file_url}")
 

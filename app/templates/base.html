@@ -85,11 +85,11 @@
   {%- if freeze==0 -%}
   <link rel=stylesheet type=text/css href="{{ request.url_for('static', path='css/font-awesome.css') }}">
   <link rel=stylesheet type=text/css href="{{ request.url_for('static', path='css/medium-editor.css') }}">
-  <link rel=stylesheet type=text/css href="{{ request.url_for('static', path='css/themes/beagle.css') }}">
   <link rel=stylesheet type=text/css href="{{ request.url_for('static', path='css/jquery.dropdown.css') }}">
   <link rel=stylesheet type=text/css href="{{ request.url_for('static', path='css/medium-editor-insert-plugin.min.css') }}">
   {%- endif %}
   <link rel=stylesheet type=text/css href="{{ request.url_for('static', path='css/style.css') }}">
+  <link rel=stylesheet type=text/css href="{{ request.url_for('static', path='css/themes/orange.css') }}">
   <link rel="preload" href="{{ request.url_for('static', path='js/client.js') }}" as="script">
   <!-- MathJax is lazy-loaded only when math content is detected -->
   {%- if freeze==0 -%}
@@ -239,7 +239,9 @@
         </div>
         {%- else -%}
         <nav id="editor_tools">
+          {%- if not is_live_mode -%}
           <div class="post_static" data-jq-dropdown="#jq-dropdown-publish" data-horizontal-offset="6" class="post_dropdown"><a title="Deploy to live site" href="/"><i class="fa fa-bolt search_icon"></i>deploy</a></div>
+          {%- endif -%}
           <div class="post_static"><a title="Analytics Dashboard" href="/analytics/">analytics</a></div>
           <div class="post_static"><a title="search" href="{{ request.url_for('search') }}"><i class="fa fa-search search_icon"></i>search</a></div>
           <div class="post_static"><a title="tags" href="{{ request.url_for('tags') }}">tags</a></div>
@@ -270,7 +272,7 @@
         {%- endif %}
       </div>
     </header>
-    {%- if freeze==0 %}
+    {%- if freeze==0 and is_authenticated %}
     <div class="note_publish"></div>
     <div id="jq-dropdown-publish" class="jq-dropdown jq-dropdown-tip jq-dropdown-anchor-right">
       <ul class="jq-dropdown-menu">
@@ -375,6 +377,12 @@
         </div>
       </div>
     </footer>
+    <script>
+      window.FlowMatomoConfig = {
+        url: {{ app.matomo_url | tojson }},
+        siteId: {{ app.matomo_site_id | tojson }}
+      };
+    </script>
     <script src="{{ request.url_for('static', path='js/client.js') }}"></script>
   </div>
 </body>

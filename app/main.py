@@ -3,6 +3,7 @@
 from fastapi import FastAPI, Request
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.staticfiles import StaticFiles
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 import logging
@@ -38,6 +39,9 @@ cleaned_prefix = sanitized_prefix.strip('/')
 root_path_for_fastapi = ('/' + cleaned_prefix) if cleaned_prefix else ''
 
 app = FastAPI(title=settings.site_name, root_path=root_path_for_fastapi)
+
+# Trust proxy headers from nginx for scheme/host
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 # Make sure required directories exist
 content_path = Path(settings.content_dir)
