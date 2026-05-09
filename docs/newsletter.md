@@ -1,23 +1,28 @@
-# Newsletter feature toggle
+# Newsletter Feature Toggle
 
-The newsletter button and footer link are controlled by `newsletter_url` in `app/settings.py` (or the `.env` override for that setting).
+The top navigation newsletter button is controlled by `newsletter_button_enabled`
+and `newsletter_url` in `app/settings.py` or `.env`.
 
 ## Current state
 
-The default value is now empty, which hides the newsletter UI.
+The newsletter URL is configured, but `newsletter_button_enabled` defaults to
+`False`, which hides the top navigation newsletter button.
 
 ## Re-enable
 
-Set a URL (example in `.env`):
+Set both values (example in `.env`):
 
 ```
-NEWSLETTER_URL="https://mailchi.mp/your-list"
+newsletter_button_enabled=true
+newsletter_url="https://mailchi.mp/your-list"
 ```
 
-Or edit the default in `app/settings.py`:
+Or edit the defaults in `app/settings.py`:
 
 ```
+newsletter_button_enabled: bool = True
 newsletter_url: str = "https://mailchi.mp/your-list"
 ```
 
-Once set, the newsletter link and CTA will appear again on the site.
+Once enabled, the newsletter button will appear in the top navigation. Leave the
+flag false to keep only the footer newsletter link.

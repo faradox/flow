@@ -214,7 +214,7 @@
             <a title="Tags" href="{{ request.url_for('tags') }}">tags</a>
           </div>
           <div class="post_static"><a title="About" href="{{ request.url_for('page', path='about') }}">about</a></div>
-          {%- if app.newsletter_url -%}
+          {%- if app.newsletter_button_enabled and app.newsletter_url -%}
           <div class="post_static"><a title="Subscribe to newsletter" href="{{ app.newsletter_url }}" target="_blank" rel="noopener" class="newsletter-btn">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
@@ -246,7 +246,7 @@
           <div class="post_static"><a title="search" href="{{ request.url_for('search') }}"><i class="fa fa-search search_icon"></i>search</a></div>
           <div class="post_static"><a title="tags" href="{{ request.url_for('tags') }}">tags</a></div>
           <div class="post_static"><a title="about" href="{{ request.url_for('page', path='about') }}">about</a></div>
-          {%- if app.newsletter_url -%}
+          {%- if app.newsletter_button_enabled and app.newsletter_url -%}
           <div class="post_static"><a title="Subscribe to newsletter" href="{{ app.newsletter_url }}" target="_blank" rel="noopener" class="newsletter-btn">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>

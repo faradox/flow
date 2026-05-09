@@ -153,14 +153,18 @@ Create a post in the UI and then rename the file in your `/content/p/` folder to
 
 ## Newsletter Integration
 
-To add a "Subscribe" button to your navigation, set the `newsletter_url` in your settings:
+To add a "Subscribe" button to your navigation, set `newsletter_button_enabled`
+and `newsletter_url` in your settings:
 
 ```python
 # In app/settings.py
+newsletter_button_enabled: bool = True
 newsletter_url: str = "https://mailchi.mp/xxx/yourlist"
 ```
 
-Leave empty or remove to hide the subscribe button. Works with any newsletter service (Mailchimp, Buttondown, etc.).
+Leave `newsletter_button_enabled` false to hide the top navigation button while
+keeping the footer newsletter link. Leave `newsletter_url` empty to hide all
+newsletter links. Works with any newsletter service (Mailchimp, Buttondown, etc.).
 
 ## Related Posts & Backlinks
 

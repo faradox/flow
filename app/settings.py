@@ -23,8 +23,9 @@ class Settings(BaseSettings):
     author_image: str = "https://samim.io/static/upload/A8SKcX4t_400x400.jpg"
     author_twitter: str = "samim"
     
-    # Newsletter (optional - set to enable newsletter badge in nav)
+    # Newsletter
     newsletter_url: str = "https://mailchi.mp/4804acffeb6e/samimio"  # e.g., "https://mailchi.mp/xxx/yourlist"
+    newsletter_button_enabled: bool = False  # Set true to show the top nav newsletter button
 
     # Server settings
     local_server_port: int = 2323
