@@ -34,10 +34,8 @@ class Settings(BaseSettings):
     about_page_title: str = "About"
     about_page_date: str = "2026-05-09T00:00:00"
 
-    # Link back to the author's main website (nav, footer, about page); empty hides it
+    # Link back to the author's main website (about page, JSON-LD author); empty hides it
     home_url: str = "https://breathdance.net"
-    home_link_label: str = "breathdance"
-    home_link_title: str = "Main website"
 
     # Server settings
     local_server_port: int = 2323
