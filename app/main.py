@@ -12,6 +12,7 @@ import re
 
 from app.settings import settings
 from app.routes import router
+from app.about_page import sync_about_page_from_bio
 from app.content import ContentManager
 from app.generator import StaticSiteGenerator
 from app.uploader import FTPUploader, RsyncUploader
@@ -56,6 +57,7 @@ for path in [content_path, upload_path, build_path, cache_path]:
         logger.info(f"Created directory at {path.absolute()}")
 
 # Initialize core components
+sync_about_page_from_bio(settings)
 content_manager = ContentManager(settings.content_dir)
 
 @app.on_event("startup")

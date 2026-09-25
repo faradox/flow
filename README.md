@@ -149,7 +149,12 @@ In live mode, search uses server-side filtering instead of Pagefind. For the sta
 
 ## About Page Setup
 
-Create a post in the UI and then rename the file in your `/content/p/` folder to `about.md`
+By default, `/p/about/` is generated from the shared landing-page bio at
+`assets/static/bio.txt`. The sync writes `content/p/about.md` before the blog
+content manager loads pages.
+
+Set `about_page_from_bio_enabled` to false if you want to manage `about.md`
+manually again.
 
 ## Newsletter Integration
 

@@ -2,6 +2,7 @@
 
 import uvicorn
 from app.settings import settings
+from app.about_page import sync_about_page_from_bio
 import click
 from app.content import ContentManager
 from app.generator import StaticSiteGenerator
@@ -23,6 +24,7 @@ def cli(ctx):
 @click.option('--all/--no-all', default=False, help='Clear all cache types')
 def clear_cache(tags, archives, tag_archives, posts, all):
     """Clear selected parts of the site cache"""
+    sync_about_page_from_bio(settings)
     content_manager = ContentManager(settings.content_dir)
     generator = StaticSiteGenerator(
         "app/templates", 
@@ -117,6 +119,7 @@ def analytics_sync():
             return
         
         click.echo("🔄 Syncing analytics from Matomo...")
+        sync_about_page_from_bio(settings)
         content_manager = ContentManager(settings.content_dir)
         store = get_analytics_store()
         updated = store.sync_from_matomo(content_manager)

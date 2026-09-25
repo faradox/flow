@@ -233,7 +233,7 @@
               <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>
             </svg>
           </a></div>
-          {%- if is_live_mode and not is_authenticated -%}
+          {%- if is_live_mode and not is_authenticated and not app.login_button_hidden -%}
           <div class="post_static"><a title="Login to edit" href="{{ request.url_for('login') }}">login</a></div>
           {%- endif -%}
         </div>

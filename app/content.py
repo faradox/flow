@@ -98,6 +98,7 @@ class PageMetadata(BaseModel):
     title: str
     date: datetime
     status: str = "public"
+    listed: bool = True
     tags: Optional[List[str]] = None
     author: Optional[str] = None
     author_name: Optional[str] = None
@@ -461,16 +462,25 @@ class ContentManager:
         
         return None
 
-    def get_pages_by_status(self, status: str, username: Optional[str] = None, include_future: bool = False) -> List[Page]:
+    def get_pages_by_status(
+        self,
+        status: str,
+        username: Optional[str] = None,
+        include_future: bool = False,
+        include_unlisted: bool = False,
+    ) -> List[Page]:
         """Get all pages with a specific status.
         
         By default, excludes posts with future dates (scheduled posts).
         Set include_future=True to include all posts regardless of date.
+        Set include_unlisted=True to include standalone pages hidden from feeds.
         """
         now = datetime.now()
         pages = []
         for page in self.pages.values():
             if page.metadata.status != status:
+                continue
+            if not include_unlisted and not page.metadata.listed:
                 continue
             if username and page.metadata.author != username:
                 continue

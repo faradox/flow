@@ -863,7 +863,12 @@ class StaticSiteGenerator:
         """Generate sitemap"""
         try:
             # Get all public pages and ensure they're a list
-            public_pages = list(self.content_manager.get_pages_by_status("public"))
+            public_pages = list(
+                self.content_manager.get_pages_by_status(
+                    "public",
+                    include_unlisted=True,
+                )
+            )
             
             context = self.get_template_context({
                 "pages": public_pages,
@@ -1090,9 +1095,16 @@ class StaticSiteGenerator:
             stage_start = self.metrics.start_stage("setup")
             static_files_copied = await self._copy_static_files()
             
-            # Get public pages and tags
+            # Get listed public pages for feed-style pages and all public pages
+            # for standalone detail pages such as /p/about/.
             public_pages = list(self.content_manager.get_pages_by_status("public"))
-            self.metrics.total_pages = len(public_pages)
+            all_public_pages = list(
+                self.content_manager.get_pages_by_status(
+                    "public",
+                    include_unlisted=True,
+                )
+            )
+            self.metrics.total_pages = len(all_public_pages)
             
             all_tags = set()
             for page in public_pages:
@@ -1130,7 +1142,7 @@ class StaticSiteGenerator:
             
             # Check which pages need to be generated
             pages_to_generate = []
-            for page in public_pages:
+            for page in all_public_pages:
                 cache_key = f"page.html:p/{page.path}/index.html"
                 content_hash = hashlib.md5(json.dumps({
                     "path": page.path,

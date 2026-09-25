@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     newsletter_url: str = "https://mailchi.mp/4804acffeb6e/samimio"  # e.g., "https://mailchi.mp/xxx/yourlist"
     newsletter_button_enabled: bool = False  # Set true to show the top nav newsletter button
 
+    # About page (optional - sync /p/about/ from the shared landing-page bio)
+    about_page_from_bio_enabled: bool = True
+    about_page_source: Path = Path("assets/static/bio.txt")
+    about_page_slug: str = "about"
+    about_page_title: str = "About"
+    about_page_date: str = "2026-05-09T00:00:00"
+
     # Server settings
     local_server_port: int = 2323
     local_server_debug: bool = True
@@ -45,6 +52,7 @@ class Settings(BaseSettings):
     # Authentication (set admin_password to enable live mode with login)
     admin_password: str = ""  # Leave empty for local dev mode, set for live server
     session_secret: str = "change-this-secret-key-in-production"  # Used to sign session cookies
+    login_button_hidden: bool = True  # UI only; /login remains accessible directly
 
     # Upload settings
     upload_method: str = "ftp"  # Options: "ftp" or "rsync"
