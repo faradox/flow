@@ -1,0 +1,4 @@
+{#- Fork-local: link back to the author's main website (see settings.home_url) -#}
+{%- if app.home_url -%}
+<div class="post_static"><a title="{{ app.home_link_title }}" href="{{ app.home_url }}" rel="me">{{ app.home_link_label }}</a></div>
+{%- endif -%}

@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Any, Iterable, Optional
+from urllib.parse import urlparse
 import logging
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,13 @@ def _render_about_markdown(settings: Any, bio: str) -> str:
     if author:
         frontmatter.append(f"author: {author}")
 
-    frontmatter.extend(["---", "", bio.strip(), ""])
+    body = [bio.strip()]
+    home_url = getattr(settings, "home_url", "")
+    if home_url:
+        home_host = urlparse(home_url).netloc or home_url
+        body.append(f"More of my projects and ways to reach me: [{home_host}]({home_url})")
+
+    frontmatter.extend(["---", "", "\n\n".join(body), ""])
     return "\n".join(frontmatter)
 
 

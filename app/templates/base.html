@@ -144,7 +144,7 @@
     "author": {
       "@type": "Person",
       "name": "{{page.meta.author_name|default(app.author_name, true)}}",
-      "url": "{{app.site_url}}"
+      "url": "{{app.home_url|default(app.site_url, true)}}"
     },
     "publisher": {
       "@type": "Organization",
@@ -214,6 +214,7 @@
             <a title="Tags" href="{{ request.url_for('tags') }}">tags</a>
           </div>
           <div class="post_static"><a title="About" href="{{ request.url_for('page', path='about') }}">about</a></div>
+          {%- include "local/home_link_nav.html" -%}
           {%- if app.newsletter_button_enabled and app.newsletter_url -%}
           <div class="post_static"><a title="Subscribe to newsletter" href="{{ app.newsletter_url }}" target="_blank" rel="noopener" class="newsletter-btn">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -246,6 +247,7 @@
           <div class="post_static"><a title="search" href="{{ request.url_for('search') }}"><i class="fa fa-search search_icon"></i>search</a></div>
           <div class="post_static"><a title="tags" href="{{ request.url_for('tags') }}">tags</a></div>
           <div class="post_static"><a title="about" href="{{ request.url_for('page', path='about') }}">about</a></div>
+          {%- include "local/home_link_nav.html" -%}
           {%- if app.newsletter_button_enabled and app.newsletter_url -%}
           <div class="post_static"><a title="Subscribe to newsletter" href="{{ app.newsletter_url }}" target="_blank" rel="noopener" class="newsletter-btn">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -367,6 +369,7 @@
             <a href="{{ request.url_for('index') }}">{{app.site_name}}</a>
           </div>
           <nav class="footer-links">
+            {%- include "local/home_link_footer.html" %}
             {%- if app.newsletter_url %}
             <a href="{{ app.newsletter_url }}" target="_blank" rel="noopener" class="footer-newsletter">
               Newsletter
