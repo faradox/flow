@@ -99,11 +99,14 @@ Flow can run directly as a live web application instead of generating static fil
 
 ### Quick Setup
 
-1. Set an admin password in `app/settings.py`:
+1. Configure the login. On breathdance the editor sits behind Authelia
+   (`app/auth.py`, `docs/identity.md` in the monorepo); the app has no
+   password of its own:
 
-```python
-admin_password: str = "your-secure-password"
-session_secret: str = "change-this-random-string"
+```bash
+PROXY_SECRET=...      # same value nginx sends as X-Proxy-Secret on the editor paths
+ALLOWED_USER=felix    # the Authelia user name allowed to edit
+SESSION_SECRET=...    # 32+ random characters, signs the editor cookie
 ```
 
 2. Run with a production server:
@@ -138,10 +141,66 @@ server {
 
 ### How It Works
 
-- **No password set**: Editor is always accessible (local development mode)
-- **Password set**: Public users see read-only site, login required for editing
-- Visit `/login` to authenticate and access the editor
-- All write operations (post, upload, delete) require authentication
+- **No `PROXY_SECRET`**: editor always accessible (local development mode)
+- **`PROXY_SECRET` set**: public users see the read-only site. nginx sends
+  `/login`, the write endpoints (`/post`, `/upload`, `/delete`, `/publish`,
+  `/publishing-status`) and `/analytics/` (except `/analytics/api/popular`)
+  through Authelia and adds `Remote-User` + `X-Proxy-Secret`.
+- `/login` turns the Authelia session into a signed editor cookie (7 days) so
+  the public pages show the editor. The cookie only changes what pages show:
+  every write still needs the Authelia headers and a same-origin `Origin`.
+- `/logout` leaves editor mode; the Authelia session (shared by all apps) stays.
+- Uploaded images are re-encoded as WebP with EXIF/GPS/XMP removed
+  (`app/images.py`); files that do not decode are rejected.
+
+## Photo Ingest API
+
+`POST /api/ingest/photo` turns one picture plus its tags into a post. It is
+meant for the image tagging tool's "post on blog" button and is the only
+endpoint outside Authelia that writes (`app/ingest.py`).
+
+Auth: `Authorization: Bearer <token>`. The server stores only the token's
+SHA-256 (`INGEST_TOKEN_SHA256`); empty disables the endpoint (503). The token
+can create posts here and do nothing else. nginx rate-limits the path to
+10 requests/minute (burst 5) and 41 MB.
+
+Multipart fields:
+
+| Field | |
+|---|---|
+| `image` | Required. Any format Pillow decodes, max 40 MB |
+| `tags` | Repeat the field and/or comma-separate. Lowercased, spaces become `-`, only letters, digits, `_`, `-`; max 30 |
+| `title` | Optional, defaults to the date. Quotes and control characters are removed |
+| `body` | Optional plain text (escaped); blank lines separate paragraphs |
+| `status` | `private` (default, `INGEST_DEFAULT_STATUS`: not listed, but reachable by URL) or `public` |
+
+The server picks the post path (`YYYY-MM-DD-<title-slug>-<sha8>`) and stores
+the image as `upload/<path>.webp`: orientation applied, metadata removed, long
+edge at most `INGEST_MAX_EDGE` (2400) px. The post records
+`source_sha256: sha256:<hex>` of the uploaded bytes; posting the same file
+again returns the existing post instead of a duplicate.
+
+Responses are always JSON:
+
+```text
+201 {"result": "created", "path": "...", "url": "https://blog.breathdance.net/p/.../",
+     "status": "private", "image_url": "https://blog.breathdance.net/upload/....webp"}
+200 {"result": "exists", ...same fields, for the earlier post}
+400 bad field   401 missing/wrong token   409 name clash   413 too large
+415 not an image   429 rate limited (nginx)   503 ingest not configured
+```
+
+Example:
+
+```bash
+curl -fsS https://blog.breathdance.net/api/ingest/photo \
+  -H "Authorization: Bearer $(secret-tool lookup service blog-ingest)" \
+  -F image=@IMG_1234.jpg -F tags=garden -F tags="tomatoes, summer" \
+  -F title="First tomatoes" -F status=private
+```
+
+Tests: `python -m pytest tests` from this directory (image tests need only
+Pillow; the auth/route/ingest tests need the app's requirements).
 
 ### Note on Search
 

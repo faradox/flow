@@ -52,10 +52,22 @@ class Settings(BaseSettings):
     matomo_token: str = ""  # Your Matomo auth token
     analytics_cache_hours: int = 1  # How long to cache analytics data
 
-    # Authentication (set admin_password to enable live mode with login)
-    admin_password: str = ""  # Leave empty for local dev mode, set for live server
-    session_secret: str = "change-this-secret-key-in-production"  # Used to sign session cookies
+    # Authentication (app/auth.py). Live mode: nginx puts /login, the write
+    # endpoints and /analytics/ behind Authelia and vouches for the user with
+    # X-Proxy-Secret + Remote-User. An empty proxy_secret is local dev: no login.
+    proxy_secret: str = ""
+    allowed_user: str = ""  # The Authelia user name allowed to edit
+    session_secret: str = "change-this-secret-key-in-production"  # Signs the editor cookie
+    editor_session_days: int = 7
     login_button_hidden: bool = True  # UI only; /login remains accessible directly
+    admin_password: str = ""  # Unused since the move to Authelia; kept so old .env files load
+
+    # Photo ingest API (app/ingest.py) for the image tagging tool.
+    # SHA-256 hex digest of the bearer token; empty disables the endpoint.
+    ingest_token_sha256: str = ""
+    ingest_max_bytes: int = 40 * 1024 * 1024
+    ingest_max_edge: int = 2400  # Long edge of the published image, in pixels
+    ingest_default_status: str = "private"  # "private" (unlisted) or "public"
 
     # Upload settings
     upload_method: str = "ftp"  # Options: "ftp" or "rsync"

@@ -12,6 +12,8 @@ import re
 
 from app.settings import settings
 from app.routes import router
+from app.ingest import router as ingest_router
+from app.auth import check_live_config
 from app.about_page import sync_about_page_from_bio
 from app.content import ContentManager
 from app.generator import StaticSiteGenerator
@@ -57,6 +59,7 @@ for path in [content_path, upload_path, build_path, cache_path]:
         logger.info(f"Created directory at {path.absolute()}")
 
 # Initialize core components
+check_live_config()
 sync_about_page_from_bio(settings)
 content_manager = ContentManager(settings.content_dir)
 
@@ -118,6 +121,7 @@ app.state.settings = settings
 
 # Include routes
 app.include_router(router)
+app.include_router(ingest_router)
 
 # Include analytics routes (optional - only if configured)
 try:

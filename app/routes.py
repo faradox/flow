@@ -7,17 +7,25 @@ from werkzeug.utils import secure_filename
 from typing import Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
-import secrets
 import random
 import frontmatter
 import logging
 import ftplib
 import json
 import os
-import hashlib
-import hmac
 
 from app.settings import settings
+from app.auth import (
+    EDITOR_COOKIE,
+    LEGACY_COOKIE,
+    create_editor_token,
+    is_authenticated,
+    is_live_mode,
+    proxy_user,
+    require_editor,
+    safe_redirect_target,
+)
+from app.images import ImageRejected
 from app.utils import clean_content, extract_first_image, get_image_mime_type, Paginator, convert_to_webp
 
 # Configure logging
@@ -25,44 +33,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Session cookie name
-SESSION_COOKIE = "flow_session"
-
-def create_session_token() -> str:
-    """Create a signed session token"""
-    token = secrets.token_hex(16)
-    signature = hmac.new(
-        settings.session_secret.encode(),
-        token.encode(),
-        hashlib.sha256
-    ).hexdigest()[:16]
-    return f"{token}.{signature}"
-
-def verify_session_token(token: str) -> bool:
-    """Verify a session token signature"""
-    if not token or "." not in token:
-        return False
-    try:
-        token_part, signature = token.rsplit(".", 1)
-        expected_sig = hmac.new(
-            settings.session_secret.encode(),
-            token_part.encode(),
-            hashlib.sha256
-        ).hexdigest()[:16]
-        return hmac.compare_digest(signature, expected_sig)
-    except Exception:
-        return False
-
-def is_authenticated(request: Request) -> bool:
-    """Check if the current request has a valid session"""
-    if not settings.admin_password:
-        return True  # No password set = always authenticated (dev mode)
-    session_token = request.cookies.get(SESSION_COOKIE)
-    return verify_session_token(session_token)
-
-def is_live_mode() -> bool:
-    """Check if we're in live mode (password protection enabled)"""
-    return bool(settings.admin_password)
+def safe_page_path(path: str) -> str:
+    """Reject page paths that would leave the content directory."""
+    content_dir = Path(settings.content_dir).resolve()
+    if not path or "\x00" in path or path.startswith("."):
+        raise HTTPException(status_code=400, detail="Invalid page path")
+    target = (content_dir / f"{path}.md").resolve()
+    if target.parent != content_dir:
+        raise HTTPException(status_code=400, detail="Invalid page path")
+    return path
 
 def get_template_context(request: Request, context: Dict[str, Any] = None) -> Dict[str, Any]:
     """Get common template context"""
@@ -86,58 +65,35 @@ def get_template_context(request: Request, context: Dict[str, Any] = None) -> Di
         base_context.update(context)
     return base_context
 
-# Login/Logout routes
-@router.get("/login", name="login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    """Show login page"""
-    # If not in live mode, redirect to home
+# Login/Logout routes. nginx sends /login through Authelia (redirect to the
+# portal without a session); here the vouched-for user gets the editor cookie.
+@router.get("/login", name="login")
+async def login(request: Request):
+    """Turn the Authelia session into the editor cookie"""
     if not is_live_mode():
         return RedirectResponse(url="/", status_code=302)
-    
-    # If already authenticated, redirect to home
-    if is_authenticated(request):
-        return RedirectResponse(url="/", status_code=302)
-    
-    return request.app.state.templates.TemplateResponse(
-        "login.html",
-        {"request": request, "app": settings, "error": None}
-    )
+    if proxy_user(request) is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
 
-@router.post("/login", name="login_post")
-async def login_submit(request: Request):
-    """Handle login form submission"""
-    if not is_live_mode():
-        return RedirectResponse(url="/", status_code=302)
-    
-    form = await request.form()
-    password = form.get("password", "")
-    
-    # Verify password
-    if secrets.compare_digest(password, settings.admin_password):
-        # Create session and redirect
-        response = RedirectResponse(url="/", status_code=302)
-        session_token = create_session_token()
-        response.set_cookie(
-            key=SESSION_COOKIE,
-            value=session_token,
-            httponly=True,
-            samesite="lax",
-            max_age=60 * 60 * 24 * 7  # 7 days
-        )
-        return response
-    else:
-        # Invalid password
-        return request.app.state.templates.TemplateResponse(
-            "login.html",
-            {"request": request, "app": settings, "error": "Invalid password"},
-            status_code=401
-        )
+    target = safe_redirect_target(request.query_params.get("next"))
+    response = RedirectResponse(url=target, status_code=302)
+    response.set_cookie(
+        key=EDITOR_COOKIE,
+        value=create_editor_token(),
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=settings.editor_session_days * 86400,
+    )
+    response.delete_cookie(LEGACY_COOKIE)
+    return response
 
 @router.get("/logout", name="logout")
 async def logout(request: Request):
-    """Log out and clear session"""
+    """Leave editor mode. The Authelia session (shared by all apps) stays."""
     response = RedirectResponse(url="/", status_code=302)
-    response.delete_cookie(SESSION_COOKIE)
+    response.delete_cookie(EDITOR_COOKIE)
+    response.delete_cookie(LEGACY_COOKIE)
     return response
 
 # Main routes
@@ -491,12 +447,10 @@ async def api_related(request: Request):
 
 @router.post("/post")
 async def post(request: Request):
-    # Require authentication in live mode
-    if is_live_mode() and not is_authenticated(request):
-        raise HTTPException(status_code=401, detail="Authentication required")
+    require_editor(request)
     
     form = await request.form()
-    path = form['path']
+    path = safe_page_path(form['path'])
     text = form['text']
     unique = form.get('unique', 'false')
 
@@ -674,9 +628,7 @@ def write_to_log(text: str):
 @router.post("/publish")
 async def publish_site(request: Request, background_tasks: BackgroundTasks):
     """Generate static site and upload to FTP"""
-    # Require authentication in live mode
-    if is_live_mode() and not is_authenticated(request):
-        raise HTTPException(status_code=401, detail="Authentication required")
+    require_editor(request)
     
     logger.info("Starting site publication")
     write_to_log(json.dumps({"status": "publishing", "text": "Generating Site"}))
@@ -729,9 +681,7 @@ def allowed_file(filename: str) -> bool:
 @router.post("/upload")
 async def upload(request: Request, file: UploadFile = File(...)):
     """Handle file uploads with automatic WebP conversion for images"""
-    # Require authentication in live mode
-    if is_live_mode() and not is_authenticated(request):
-        raise HTTPException(status_code=401, detail="Authentication required")
+    require_editor(request)
     
     try:
         # Validate file
@@ -744,12 +694,11 @@ async def upload(request: Request, file: UploadFile = File(...)):
         # Read file content
         content = await file.read()
         
-        # Convert images to WebP (except animated GIFs)
-        # This reduces file size by ~40-60% with quality 90
-        original_ext = filename.lower().rsplit('.', 1)[-1] if '.' in filename else ''
-        if original_ext in {'png', 'jpg', 'jpeg', 'gif', 'avif'}:
+        # Re-encode as WebP without metadata (GPS!), except animated GIFs
+        try:
             content, filename = convert_to_webp(content, filename, quality=90)
-            logger.info(f"Converted image to WebP: {filename}")
+        except ImageRejected as e:
+            raise HTTPException(status_code=400, detail=str(e))
         
         # Make filename unique if needed
         file_path = Path(settings.local_upload_path) / filename
@@ -804,18 +753,18 @@ async def upload(request: Request, file: UploadFile = File(...)):
             }]
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Upload error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/delete")
 async def delete(request: Request):
-    # Require authentication in live mode
-    if is_live_mode() and not is_authenticated(request):
-        raise HTTPException(status_code=401, detail="Authentication required")
+    require_editor(request)
     
     form = await request.form()
-    path = form['path']
+    path = safe_page_path(form['path'])
     content_manager = request.app.state.content_manager
     file_path = content_manager.content_dir / f"{path}.md"
 

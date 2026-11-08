@@ -180,70 +180,27 @@ def is_animated_gif(image_bytes: bytes) -> bool:
 
 
 def convert_to_webp(image_bytes: bytes, original_filename: str, quality: int = 90) -> tuple:
-    """Convert an image to WebP format
-    
-    Args:
-        image_bytes: Raw bytes of the original image
-        original_filename: Original filename to determine format and generate new name
-        quality: WebP quality (1-100), default 90 for good balance
-        
+    """Re-encode an upload as WebP without metadata (app/images.py).
+
+    Animated GIFs are returned unchanged (GIF carries no EXIF). Everything else,
+    WebP included, is decoded and written again, so GPS and other EXIF/XMP data
+    never reach upload/.
+
     Returns:
         Tuple of (converted_bytes, new_filename)
-        Returns original bytes and filename if conversion not needed/possible
+
+    Raises:
+        ImageRejected: the bytes are not a decodable image
     """
-    from PIL import Image
-    import io
-    
-    # Get file extension
+    from app.images import sanitize_to_webp
+
     ext = original_filename.lower().rsplit('.', 1)[-1] if '.' in original_filename else ''
-    
-    # Skip if already WebP
-    if ext == 'webp':
-        return image_bytes, original_filename
-    
-    # Skip animated GIFs - keep as-is
     if ext == 'gif' and is_animated_gif(image_bytes):
         return image_bytes, original_filename
-    
-    try:
-        # Open image
-        img = Image.open(io.BytesIO(image_bytes))
-        
-        # Handle different modes
-        if img.mode in ('RGBA', 'LA', 'P'):
-            # Keep alpha channel for transparency
-            if img.mode == 'P':
-                img = img.convert('RGBA')
-        elif img.mode != 'RGB':
-            img = img.convert('RGB')
-        
-        # Convert to WebP
-        output = io.BytesIO()
-        
-        # Use lossless for images with transparency, lossy otherwise
-        if img.mode == 'RGBA':
-            # Check if image actually uses transparency
-            if img.getchannel('A').getextrema()[0] < 255:
-                # Has transparency - use lossless for quality
-                img.save(output, format='WEBP', lossless=True)
-            else:
-                # No actual transparency - convert to RGB and use lossy
-                img = img.convert('RGB')
-                img.save(output, format='WEBP', quality=quality, method=6)
-        else:
-            img.save(output, format='WEBP', quality=quality, method=6)
-        
-        # Generate new filename
-        name_without_ext = original_filename.rsplit('.', 1)[0] if '.' in original_filename else original_filename
-        new_filename = f"{name_without_ext}.webp"
-        
-        return output.getvalue(), new_filename
-        
-    except Exception as e:
-        # If conversion fails, return original
-        import logging
-        logging.getLogger(__name__).warning(f"WebP conversion failed for {original_filename}: {e}")
-        return image_bytes, original_filename
+
+    converted, _, _ = sanitize_to_webp(image_bytes, quality=quality)
+    name_without_ext = original_filename.rsplit('.', 1)[0] if '.' in original_filename else original_filename
+    return converted, f"{name_without_ext}.webp"
 
 
 class Paginator(Generic[T]):

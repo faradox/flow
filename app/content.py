@@ -106,6 +106,7 @@ class PageMetadata(BaseModel):
     link: Optional[str] = "/"
     render_as_markdown: bool = False
     custom_css_class: Optional[str] = None
+    source_sha256: Optional[str] = None  # Set by the photo ingest API (app/ingest.py)
 
     @validator("date", pre=True, always=True)
     def validate_date(cls, value):

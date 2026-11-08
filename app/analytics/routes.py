@@ -26,7 +26,7 @@ def get_analytics_template_context(request: Request, context: dict = None) -> di
         "app": settings,
         "freeze": 0,
         "is_authenticated": True,  # Analytics only shown to authenticated users
-        "is_live_mode": bool(settings.admin_password)
+        "is_live_mode": bool(settings.proxy_secret)
     }
     
     if context:
@@ -1048,10 +1048,9 @@ async def api_complete_experiment(
     This allows AI agents to close the experiment loop.
     """
     from .experiments import get_experiment_manager
-    from app.routes import is_authenticated, is_live_mode
+    from app.auth import require_editor
     
-    if is_live_mode() and not is_authenticated(request):
-        raise HTTPException(status_code=401, detail="Authentication required")
+    require_editor(request)
     
     try:
         body = await request.json()
@@ -1105,10 +1104,9 @@ async def api_update_goal(
     Automatically marks goal as "achieved" when current_value >= target_value.
     """
     from .experiments import get_experiment_manager
-    from app.routes import is_authenticated, is_live_mode
+    from app.auth import require_editor
     
-    if is_live_mode() and not is_authenticated(request):
-        raise HTTPException(status_code=401, detail="Authentication required")
+    require_editor(request)
     
     try:
         body = await request.json()
@@ -1308,6 +1306,15 @@ async def agent_upload_image(request: Request):
     from starlette.responses import JSONResponse
     from app.settings import settings
     from app.routes import convert_to_webp, secure_filename
+    from app.auth import is_live_mode, proxy_user
+    from app.images import ImageRejected
+    
+    # Downloads any URL the caller names: editor only (nginx also gates it).
+    if is_live_mode() and proxy_user(request) is None:
+        return JSONResponse(
+            status_code=401,
+            content={"success": False, "error": "Authentication required"}
+        )
     
     try:
         body = await request.json()
@@ -1361,11 +1368,14 @@ async def agent_upload_image(request: Request):
             }
             filename += ext_map.get(content_type, ".jpg")
         
-        # Convert to WebP (except animated GIFs)
-        original_ext = filename.lower().rsplit('.', 1)[-1] if '.' in filename else ''
-        if original_ext in {'png', 'jpg', 'jpeg', 'gif', 'avif'}:
+        # Re-encode as WebP without metadata, except animated GIFs
+        try:
             content, filename = convert_to_webp(content, filename, quality=90)
-            logger.info(f"Converted image to WebP: {filename}")
+        except ImageRejected as e:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": str(e), "url_tried": image_url}
+            )
         
         # Make filename unique
         file_path = Path(settings.local_upload_path) / filename
