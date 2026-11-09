@@ -20,13 +20,14 @@ analytics_router = APIRouter(prefix="/analytics", tags=["analytics"])
 def get_analytics_template_context(request: Request, context: dict = None) -> dict:
     """Build template context for analytics pages"""
     from app.settings import settings
+    from app.auth import is_live_mode
     
     base_context = {
         "request": request,
         "app": settings,
         "freeze": 0,
         "is_authenticated": True,  # Analytics only shown to authenticated users
-        "is_live_mode": bool(settings.proxy_secret)
+        "is_live_mode": is_live_mode()
     }
     
     if context:
@@ -1306,11 +1307,11 @@ async def agent_upload_image(request: Request):
     from starlette.responses import JSONResponse
     from app.settings import settings
     from app.routes import convert_to_webp, secure_filename
-    from app.auth import is_live_mode, proxy_user
+    from app.auth import editor_user
     from app.images import ImageRejected
     
     # Downloads any URL the caller names: editor only (nginx also gates it).
-    if is_live_mode() and proxy_user(request) is None:
+    if editor_user(request) is None:
         return JSONResponse(
             status_code=401,
             content={"success": False, "error": "Authentication required"}

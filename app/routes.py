@@ -7,6 +7,7 @@ from werkzeug.utils import secure_filename
 from typing import Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
+import asyncio
 import random
 import frontmatter
 import logging
@@ -18,6 +19,9 @@ from app.settings import settings
 from app.auth import (
     EDITOR_COOKIE,
     LEGACY_COOKIE,
+    auth_mode,
+    check_password,
+    cookie_secure,
     create_editor_token,
     is_authenticated,
     is_live_mode,
@@ -32,6 +36,8 @@ from app.utils import clean_content, extract_first_image, get_image_mime_type, P
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+LOGIN_FAILURE_DELAY = 1.0  # seconds after a wrong password
 
 def safe_page_path(path: str) -> str:
     """Reject page paths that would leave the content directory."""
@@ -65,32 +71,59 @@ def get_template_context(request: Request, context: Dict[str, Any] = None) -> Di
         base_context.update(context)
     return base_context
 
-# Login/Logout routes. nginx sends /login through Authelia (redirect to the
-# portal without a session); here the vouched-for user gets the editor cookie.
-@router.get("/login", name="login")
-async def login(request: Request):
-    """Turn the Authelia session into the editor cookie"""
-    if not is_live_mode():
-        return RedirectResponse(url="/", status_code=302)
-    if proxy_user(request) is None:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-    target = safe_redirect_target(request.query_params.get("next"))
-    response = RedirectResponse(url=target, status_code=302)
+def _editor_cookie_response(request: Request, target: str) -> RedirectResponse:
+    response = RedirectResponse(url=safe_redirect_target(target), status_code=302)
     response.set_cookie(
         key=EDITOR_COOKIE,
         value=create_editor_token(),
         httponly=True,
-        secure=True,
+        secure=cookie_secure(request),
         samesite="lax",
         max_age=settings.editor_session_days * 86400,
     )
     response.delete_cookie(LEGACY_COOKIE)
     return response
 
+def _login_form(request: Request, target: str, error: Optional[str] = None, status_code: int = 200):
+    return request.app.state.templates.TemplateResponse(
+        "login.html",
+        {"request": request, "app": settings, "error": error, "next": safe_redirect_target(target)},
+        status_code=status_code,
+    )
+
+# Login/Logout routes (AUTH_MODE, app/auth.py). Proxy mode: nginx sends /login
+# through the proxy auth (Authelia redirects to its portal without a session);
+# here the vouched-for user gets the editor cookie. Password mode: a form.
+@router.get("/login", name="login")
+async def login(request: Request):
+    """Proxy mode: turn the proxy session into the editor cookie. Password mode: show the form."""
+    mode = auth_mode()
+    target = request.query_params.get("next")
+    if mode == "none":
+        return RedirectResponse(url="/", status_code=302)
+    if mode == "password":
+        if is_authenticated(request):
+            return RedirectResponse(url=safe_redirect_target(target), status_code=302)
+        return _login_form(request, target)
+    if proxy_user(request) is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return _editor_cookie_response(request, target)
+
+@router.post("/login", name="login_post")
+async def login_submit(request: Request):
+    """Password mode: check ADMIN_PASSWORD and set the editor cookie."""
+    if auth_mode() != "password":
+        return RedirectResponse(url="/", status_code=302)
+    form = await request.form()
+    target = form.get("next") or "/"
+    if check_password(str(form.get("password", ""))):
+        return _editor_cookie_response(request, target)
+    await asyncio.sleep(LOGIN_FAILURE_DELAY)  # Slow down guessing
+    return _login_form(request, target, error="Invalid password", status_code=401)
+
 @router.get("/logout", name="logout")
 async def logout(request: Request):
-    """Leave editor mode. The Authelia session (shared by all apps) stays."""
+    """Leave editor mode. A proxy session (e.g. Authelia, shared by all apps) stays."""
     response = RedirectResponse(url="/", status_code=302)
     response.delete_cookie(EDITOR_COOKIE)
     response.delete_cookie(LEGACY_COOKIE)

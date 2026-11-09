@@ -31,7 +31,10 @@ x-all: &all
   MATOMO_SITE_ID: ${BLOG_MATOMO_SITE_ID:-1}
   MATOMO_TOKEN: ${BLOG_MATOMO_TOKEN:-}
   ANALYTICS_CACHE_HOURS: ${BLOG_ANALYTICS_CACHE_HOURS:-1}
-  # Editor login via Authelia (app/auth.py); empty PROXY_SECRET = dev mode, no login
+  # Editor login (app/auth.py): AUTH_MODE none | password | proxy (alias authelia).
+  # auto (default) = proxy if PROXY_SECRET is set, else password if ADMIN_PASSWORD is set, else none
+  AUTH_MODE: ${BLOG_AUTH_MODE:-auto}
+  ADMIN_PASSWORD: ${BLOG_ADMIN_PASSWORD:-}
   PROXY_SECRET: ${BLOG_PROXY_SECRET:-}
   ALLOWED_USER: ${BLOG_ALLOWED_USER:-}
   SESSION_SECRET: ${BLOG_SESSION_SECRET:-}

@@ -52,15 +52,16 @@ class Settings(BaseSettings):
     matomo_token: str = ""  # Your Matomo auth token
     analytics_cache_hours: int = 1  # How long to cache analytics data
 
-    # Authentication (app/auth.py). Live mode: nginx puts /login, the write
-    # endpoints and /analytics/ behind Authelia and vouches for the user with
-    # X-Proxy-Secret + Remote-User. An empty proxy_secret is local dev: no login.
-    proxy_secret: str = ""
-    allowed_user: str = ""  # The Authelia user name allowed to edit
+    # Authentication (app/auth.py): "none", "password", "proxy" (alias
+    # "authelia") or "auto" = proxy if proxy_secret is set, else password if
+    # admin_password is set, else none.
+    auth_mode: str = "auto"
+    admin_password: str = ""  # password mode: the editor password
+    proxy_secret: str = ""  # proxy mode: value nginx sends as X-Proxy-Secret
+    allowed_user: str = ""  # proxy mode: the Remote-User allowed to edit
     session_secret: str = "change-this-secret-key-in-production"  # Signs the editor cookie
     editor_session_days: int = 7
     login_button_hidden: bool = True  # UI only; /login remains accessible directly
-    admin_password: str = ""  # Unused since the move to Authelia; kept so old .env files load
 
     # Photo ingest API (app/ingest.py) for the image tagging tool.
     # SHA-256 hex digest of the bearer token; empty disables the endpoint.

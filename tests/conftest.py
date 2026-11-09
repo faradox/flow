@@ -30,6 +30,8 @@ os.environ.update(
         "UPLOAD_METHOD": "local",
         "SERVER_FTP_ENABLED": "false",
         "ENABLE_FILE_MONITORING": "false",
+        "AUTH_MODE": "auto",
+        "ADMIN_PASSWORD": "",
         "PROXY_SECRET": "",
         "INGEST_TOKEN_SHA256": "",
     }

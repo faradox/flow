@@ -99,15 +99,34 @@ Flow can run directly as a live web application instead of generating static fil
 
 ### Quick Setup
 
-1. Configure the login. On breathdance the editor sits behind Authelia
-   (`app/auth.py`, `docs/identity.md` in the monorepo); the app has no
-   password of its own:
+1. Pick how the editor logs in with `AUTH_MODE` (`app/auth.py`):
+
+| `AUTH_MODE` | Login | Needs |
+|---|---|---|
+| `none` | None, everyone gets the editor. Local use only | - |
+| `password` | `/login` form with one password | `ADMIN_PASSWORD`, `SESSION_SECRET` |
+| `proxy` (alias `authelia`) | A reverse proxy authenticates (Authelia, oauth2-proxy, ... via nginx `auth_request`) and passes the user in `Remote-User` | `PROXY_SECRET`, `ALLOWED_USER`, `SESSION_SECRET` |
+| `auto` (default) | `proxy` if `PROXY_SECRET` is set, else `password` if `ADMIN_PASSWORD` is set, else `none` | |
+
+The simplest public setup is the password:
 
 ```bash
-PROXY_SECRET=...      # same value nginx sends as X-Proxy-Secret on the editor paths
-ALLOWED_USER=felix    # the Authelia user name allowed to edit
+AUTH_MODE=password
+ADMIN_PASSWORD=...    # the editor password
 SESSION_SECRET=...    # 32+ random characters, signs the editor cookie
 ```
+
+Behind a proxy that authenticates (on breathdance: Authelia, see
+`docs/identity.md` in the monorepo):
+
+```bash
+AUTH_MODE=proxy
+PROXY_SECRET=...      # same value nginx sends as X-Proxy-Secret on the editor paths
+ALLOWED_USER=felix    # the Remote-User allowed to edit
+SESSION_SECRET=...    # 32+ random characters, signs the editor cookie
+```
+
+The app refuses to start when the chosen mode is missing one of its settings.
 
 2. Run with a production server:
 
@@ -127,6 +146,7 @@ server {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
     
     location /static {
@@ -141,15 +161,19 @@ server {
 
 ### How It Works
 
-- **No `PROXY_SECRET`**: editor always accessible (local development mode)
-- **`PROXY_SECRET` set**: public users see the read-only site. nginx sends
-  `/login`, the write endpoints (`/post`, `/upload`, `/delete`, `/publish`,
-  `/publishing-status`) and `/analytics/` (except `/analytics/api/popular`)
-  through Authelia and adds `Remote-User` + `X-Proxy-Secret`.
-- `/login` turns the Authelia session into a signed editor cookie (7 days) so
-  the public pages show the editor. The cookie only changes what pages show:
-  every write still needs the Authelia headers and a same-origin `Origin`.
-- `/logout` leaves editor mode; the Authelia session (shared by all apps) stays.
+- **`none`**: editor always accessible (local development mode).
+- In the other modes public users see the read-only site; the editor shows
+  for a valid editor cookie (`EDITOR_SESSION_DAYS`, default 7).
+- **`password`**: `/login` shows a password form and sets the editor cookie.
+  Writes need the cookie and a same-origin `Origin`. The cookie is `Secure`
+  when the request came over HTTPS (directly or `X-Forwarded-Proto`).
+- **`proxy`**: nginx sends `/login`, the write endpoints (`/post`, `/upload`,
+  `/delete`, `/publish`, `/publishing-status`) and `/analytics/` (except
+  `/analytics/api/popular`) through the proxy auth and adds `Remote-User` +
+  `X-Proxy-Secret`. `/login` turns that session into the editor cookie so the
+  public pages show the editor. The cookie only changes what pages show:
+  every write still needs the proxy headers and a same-origin `Origin`.
+- `/logout` leaves editor mode; a proxy session (shared by all apps) stays.
 - Uploaded images are re-encoded as WebP with EXIF/GPS/XMP removed
   (`app/images.py`); files that do not decode are rejected.
 
@@ -157,7 +181,7 @@ server {
 
 `POST /api/ingest/photo` turns one picture plus its tags into a post. It is
 meant for the image tagging tool's "post on blog" button and is the only
-endpoint outside Authelia that writes (`app/ingest.py`).
+endpoint outside the editor login that writes (`app/ingest.py`).
 
 Auth: `Authorization: Bearer <token>`. The server stores only the token's
 SHA-256 (`INGEST_TOKEN_SHA256`); empty disables the endpoint (503). The token

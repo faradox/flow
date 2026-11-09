@@ -88,6 +88,63 @@ def test_live_config_check(monkeypatch, live):
         auth.check_live_config()
 
 
+@pytest.fixture
+def password_mode(monkeypatch):
+    monkeypatch.setattr(settings, "auth_mode", "password")
+    monkeypatch.setattr(settings, "admin_password", "hunter2-but-longer")
+    monkeypatch.setattr(settings, "session_secret", "p" * 40)
+
+
+@pytest.mark.parametrize(
+    "mode, proxy_secret, admin_password, expected",
+    [
+        ("auto", "", "", "none"),
+        ("auto", "", "pw", "password"),
+        ("auto", "s", "pw", "proxy"),
+        ("", "s", "", "proxy"),
+        ("authelia", "s", "", "proxy"),
+        ("NONE", "s", "pw", "none"),
+        ("password", "s", "pw", "password"),
+    ],
+)
+def test_auth_mode_resolution(monkeypatch, mode, proxy_secret, admin_password, expected):
+    monkeypatch.setattr(settings, "auth_mode", mode)
+    monkeypatch.setattr(settings, "proxy_secret", proxy_secret)
+    monkeypatch.setattr(settings, "admin_password", admin_password)
+    assert auth.auth_mode() == expected
+
+
+def test_unknown_auth_mode_refuses_to_start(monkeypatch):
+    monkeypatch.setattr(settings, "auth_mode", "basic")
+    with pytest.raises(RuntimeError):
+        auth.check_live_config()
+
+
+def test_explicit_mode_needs_its_settings(monkeypatch):
+    monkeypatch.setattr(settings, "session_secret", "s" * 40)
+    monkeypatch.setattr(settings, "auth_mode", "password")
+    with pytest.raises(RuntimeError, match="ADMIN_PASSWORD"):
+        auth.check_live_config()
+    monkeypatch.setattr(settings, "auth_mode", "proxy")
+    with pytest.raises(RuntimeError, match="PROXY_SECRET"):
+        auth.check_live_config()
+
+
+def test_password_mode_ignores_proxy_headers(monkeypatch, password_mode):
+    monkeypatch.setattr(settings, "proxy_secret", "proxy-s3cret")
+    monkeypatch.setattr(settings, "allowed_user", "felix")
+    auth.check_live_config()
+    assert auth.proxy_user(make_request(PROXY)) is None
+    assert not auth.is_authenticated(make_request(PROXY))
+
+
+def test_password_change_invalidates_cookie(monkeypatch, password_mode):
+    token = auth.create_editor_token()
+    assert auth.verify_editor_token(token)
+    monkeypatch.setattr(settings, "admin_password", "a-new-password")
+    assert not auth.verify_editor_token(token)
+
+
 # --- editor routes -------------------------------------------------------
 
 POST_TEXT = '---\ntitle: "Hello"\ndate: 2026-11-08T10:00:00\n---\nHello there'
@@ -243,3 +300,43 @@ def test_ingest_rejects_bad_input(client, ingest_token, jpeg):
         headers={"Authorization": f"Bearer {TOKEN}"},
     )
     assert response.status_code == 400
+
+
+# --- password mode -------------------------------------------------------
+
+
+def test_password_login_form_and_wrong_password(client, password_mode, monkeypatch):
+    from app import routes
+
+    monkeypatch.setattr(routes, "LOGIN_FAILURE_DELAY", 0)
+    page = client.get("/login", params={"next": "/p/x/"})
+    assert page.status_code == 200 and 'name="password"' in page.text
+    assert 'value="/p/x/"' in page.text
+    response = client.post("/login", data={"password": "wrong", "next": "/"})
+    assert response.status_code == 401
+    assert auth.EDITOR_COOKIE not in response.headers.get("set-cookie", "")
+
+
+def test_password_login_cookie_allows_writes(client, password_mode):
+    data = {"path": "2026-11-08-password", "text": POST_TEXT}
+    assert client.post("/post", data=data).status_code == 401
+    response = client.post("/login", data={"password": "hunter2-but-longer", "next": "//evil.example"})
+    assert response.status_code == 302
+    assert response.headers["location"] == "/"
+    set_cookie = response.headers["set-cookie"]
+    assert "HttpOnly" in set_cookie and "Secure" not in set_cookie  # plain-HTTP test client
+    cookie = {auth.EDITOR_COOKIE: client.cookies.get(auth.EDITOR_COOKIE)}
+    client.cookies.clear()
+    assert client.post("/post", data=data, cookies=cookie).status_code == 200
+    headers = {"Origin": "https://evil.example"}
+    assert client.post("/post", data=data, cookies=cookie, headers=headers).status_code == 403
+
+
+def test_password_login_cookie_secure_behind_https_proxy(client, password_mode):
+    response = client.post(
+        "/login",
+        data={"password": "hunter2-but-longer"},
+        headers={"X-Forwarded-Proto": "https"},
+    )
+    assert "Secure" in response.headers["set-cookie"]
+
