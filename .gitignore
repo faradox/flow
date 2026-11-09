@@ -29,3 +29,7 @@ app/analytics/data/network-kit.md
 app/data/sidebar-popular.txt
 # But keep the example template
 !app/data/sidebar-popular.txt.example
+
+# Local, untracked config (server wiring, deploy target)
+docker-compose.override.yml
+local.mk

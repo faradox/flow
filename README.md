@@ -60,6 +60,20 @@ python3 flow.py
 
 3. Visit `http://127.0.0.1:2323/` to start creating content
 
+### With Docker
+
+```bash
+make run     # creates content/, upload/, build/, cache/, builds the image if needed, starts it
+make logs
+make stop
+```
+
+The container listens on `127.0.0.1:2323` only (`BLOG_LOCAL_SERVER_PORT`). It
+takes its settings from `BLOG_*` variables in the host environment (all listed
+in `docker-compose.yml`, e.g. `BLOG_SITE_URL`, `BLOG_AUTH_MODE`,
+`BLOG_ADMIN_PASSWORD`). Without any, the editor is open (`AUTH_MODE` `none`,
+see below), which is fine locally only.
+
 ## Publishing Your Site
 
 Flow supports two deployment methods: **FTP** (traditional) and **rsync** (faster, recommended if you have SSH access).
@@ -116,13 +130,12 @@ ADMIN_PASSWORD=...    # the editor password
 SESSION_SECRET=...    # 32+ random characters, signs the editor cookie
 ```
 
-Behind a proxy that authenticates (on breathdance: Authelia, see
-`docs/identity.md` in the monorepo):
+Behind a proxy that authenticates (e.g. Authelia or oauth2-proxy):
 
 ```bash
 AUTH_MODE=proxy
 PROXY_SECRET=...      # same value nginx sends as X-Proxy-Secret on the editor paths
-ALLOWED_USER=felix    # the Remote-User allowed to edit
+ALLOWED_USER=alice    # the Remote-User allowed to edit
 SESSION_SECRET=...    # 32+ random characters, signs the editor cookie
 ```
 
@@ -173,7 +186,7 @@ server {
   `X-Proxy-Secret`. `/login` turns that session into the editor cookie so the
   public pages show the editor. The cookie only changes what pages show:
   every write still needs the proxy headers and a same-origin `Origin`.
-- `/logout` leaves editor mode; a proxy session (shared by all apps) stays.
+- `/logout` leaves editor mode; a proxy session (e.g. single sign-on) stays.
 - Uploaded images are re-encoded as WebP with EXIF/GPS/XMP removed
   (`app/images.py`); files that do not decode are rejected.
 
@@ -185,8 +198,8 @@ endpoint outside the editor login that writes (`app/ingest.py`).
 
 Auth: `Authorization: Bearer <token>`. The server stores only the token's
 SHA-256 (`INGEST_TOKEN_SHA256`); empty disables the endpoint (503). The token
-can create posts here and do nothing else. nginx rate-limits the path to
-10 requests/minute (burst 5) and 41 MB.
+can create posts here and do nothing else. Rate-limit the path in the reverse
+proxy (e.g. 10 requests/minute) and allow bodies of at least 41 MB.
 
 Multipart fields:
 
@@ -207,8 +220,8 @@ again returns the existing post instead of a duplicate.
 Responses are always JSON:
 
 ```text
-201 {"result": "created", "path": "...", "url": "https://blog.breathdance.net/p/.../",
-     "status": "private", "image_url": "https://blog.breathdance.net/upload/....webp"}
+201 {"result": "created", "path": "...", "url": "https://blog.example.com/p/.../",
+     "status": "private", "image_url": "https://blog.example.com/upload/....webp"}
 200 {"result": "exists", ...same fields, for the earlier post}
 400 bad field   401 missing/wrong token   409 name clash   413 too large
 415 not an image   429 rate limited (nginx)   503 ingest not configured
@@ -217,7 +230,7 @@ Responses are always JSON:
 Example:
 
 ```bash
-curl -fsS https://blog.breathdance.net/api/ingest/photo \
+curl -fsS https://blog.example.com/api/ingest/photo \
   -H "Authorization: Bearer $(secret-tool lookup service blog-ingest)" \
   -F image=@IMG_1234.jpg -F tags=garden -F tags="tomatoes, summer" \
   -F title="First tomatoes" -F status=private
@@ -232,9 +245,14 @@ In live mode, search uses server-side filtering instead of Pagefind. For the sta
 
 ## About Page Setup
 
-By default, `/p/about/` is generated from the shared landing-page bio at
-`assets/static/bio.txt`. The sync writes `content/p/about.md` before the blog
-content manager loads pages.
+By default, `/p/about/` is generated from a plain-text bio at
+`about_page_source` (`assets/static/bio.txt`, looked up in the working
+directory, the app directory and their parents). The sync writes
+`content/p/about.md` before the blog content manager loads pages; without the
+file it logs a warning and skips.
+`docker-compose.yml` turns the sync off; to use it there, mount the bio file
+into the container (e.g. at `/app/assets/static/bio.txt`) and set
+`BLOG_ABOUT_PAGE_FROM_BIO_ENABLED=true`.
 
 Set `about_page_from_bio_enabled` to false if you want to manage `about.md`
 manually again.

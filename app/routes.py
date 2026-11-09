@@ -96,7 +96,7 @@ def _login_form(request: Request, target: str, error: Optional[str] = None, stat
     )
 
 # Login/Logout routes (AUTH_MODE, app/auth.py). Proxy mode: nginx sends /login
-# through the proxy auth (Authelia redirects to its portal without a session);
+# through the proxy auth (e.g. Authelia redirects to its portal without a session);
 # here the vouched-for user gets the editor cookie. Password mode: a form.
 @router.get("/login", name="login")
 async def login(request: Request):
@@ -127,7 +127,7 @@ async def login_submit(request: Request):
 
 @router.get("/logout", name="logout")
 async def logout(request: Request):
-    """Leave editor mode. A proxy session (e.g. Authelia, shared by all apps) stays."""
+    """Leave editor mode. A proxy session (e.g. single sign-on) stays."""
     response = RedirectResponse(url="/", status_code=302)
     response.delete_cookie(EDITOR_COOKIE)
     response.delete_cookie(LEGACY_COOKIE)

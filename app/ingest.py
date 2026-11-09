@@ -2,7 +2,7 @@
 """Photo ingest API: one picture plus its tags becomes one blog post.
 
 Called by the image tagging tool's "post on blog" button. nginx passes
-/api/ingest/ without Authelia; the caller authenticates with a bearer token
+/api/ingest/ without the proxy auth; the caller authenticates with a bearer token
 whose SHA-256 is INGEST_TOKEN_SHA256. The token can create posts through this
 endpoint and nothing else: no edit, delete, listing or analytics.
 

@@ -13,7 +13,7 @@
     A reverse proxy authenticates (Authelia, oauth2-proxy, ... via nginx
     ``auth_request``) before it passes the editor paths (``/login``, the write
     endpoints, ``/analytics/``) and adds ``Remote-User`` plus
-    ``X-Proxy-Secret`` (docs/identity.md in the breathdance repo). The public
+    ``X-Proxy-Secret`` (a shared secret only the proxy knows). The public
     pages never go through the proxy auth, so ``GET /login`` turns that
     session into a signed editor cookie that lets those pages show the
     editor. Every write still needs the proxy headers; the cookie alone only

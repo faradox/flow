@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     about_page_date: str = "2026-05-09T00:00:00"
 
     # Link back to the author's main website (about page, JSON-LD author); empty hides it
-    home_url: str = "https://breathdance.net"
+    home_url: str = ""  # e.g. "https://example.com"
 
     # Server settings
     local_server_port: int = 2323

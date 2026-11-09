@@ -14,7 +14,7 @@ from app import auth  # noqa: E402
 from app.main import app  # noqa: E402
 from app.settings import settings  # noqa: E402
 
-PROXY = {"X-Proxy-Secret": "proxy-s3cret", "Remote-User": "felix"}
+PROXY = {"X-Proxy-Secret": "proxy-s3cret", "Remote-User": "alice"}
 TOKEN = "ingest-token-for-tests"
 
 
@@ -26,7 +26,7 @@ def client():
 @pytest.fixture
 def live(monkeypatch):
     monkeypatch.setattr(settings, "proxy_secret", "proxy-s3cret")
-    monkeypatch.setattr(settings, "allowed_user", "felix")
+    monkeypatch.setattr(settings, "allowed_user", "alice")
     monkeypatch.setattr(settings, "session_secret", "s" * 40)
 
 
@@ -52,10 +52,10 @@ def test_dev_mode_allows_everything():
 
 
 def test_proxy_user_needs_secret_and_allowed_user(live):
-    assert auth.proxy_user(make_request(PROXY)) == "felix"
+    assert auth.proxy_user(make_request(PROXY)) == "alice"
     assert auth.proxy_user(make_request({**PROXY, "X-Proxy-Secret": "nope"})) is None
     assert auth.proxy_user(make_request({**PROXY, "Remote-User": "mallory"})) is None
-    assert auth.proxy_user(make_request({"Remote-User": "felix"})) is None
+    assert auth.proxy_user(make_request({"Remote-User": "alice"})) is None
 
 
 def test_editor_token_roundtrip_expiry_and_tamper(live):
@@ -132,7 +132,7 @@ def test_explicit_mode_needs_its_settings(monkeypatch):
 
 def test_password_mode_ignores_proxy_headers(monkeypatch, password_mode):
     monkeypatch.setattr(settings, "proxy_secret", "proxy-s3cret")
-    monkeypatch.setattr(settings, "allowed_user", "felix")
+    monkeypatch.setattr(settings, "allowed_user", "alice")
     auth.check_live_config()
     assert auth.proxy_user(make_request(PROXY)) is None
     assert not auth.is_authenticated(make_request(PROXY))
@@ -150,7 +150,7 @@ def test_password_change_invalidates_cookie(monkeypatch, password_mode):
 POST_TEXT = '---\ntitle: "Hello"\ndate: 2026-11-08T10:00:00\n---\nHello there'
 
 
-def test_login_sets_cookie_from_authelia_headers(client, live):
+def test_login_sets_cookie_from_proxy_headers(client, live):
     assert client.get("/login").status_code == 401
     response = client.get("/login", params={"next": "//evil.example"}, headers=PROXY)
     assert response.status_code == 302
@@ -160,7 +160,7 @@ def test_login_sets_cookie_from_authelia_headers(client, live):
     assert "HttpOnly" in set_cookie and "Secure" in set_cookie
 
 
-def test_post_requires_authelia_headers(client, live):
+def test_post_requires_proxy_headers(client, live):
     data = {"path": "2026-11-08-hello", "text": POST_TEXT}
     assert client.post("/post", data=data).status_code == 401
     cookie = {auth.EDITOR_COOKIE: auth.create_editor_token()}
@@ -170,7 +170,7 @@ def test_post_requires_authelia_headers(client, live):
 
 def test_post_refuses_cross_origin(client, live):
     data = {"path": "2026-11-08-cross", "text": POST_TEXT}
-    headers = {**PROXY, "Origin": "https://other.breathdance.net"}
+    headers = {**PROXY, "Origin": "https://other.example.com"}
     assert client.post("/post", data=data, headers=headers).status_code == 403
     headers = {**PROXY, "Origin": "http://testserver"}
     assert client.post("/post", data=data, headers=headers).status_code == 200
@@ -227,7 +227,7 @@ def test_ingest_rejects_missing_or_wrong_token(client, ingest_token, jpeg):
         assert response.headers["www-authenticate"] == "Bearer"
 
 
-def test_ingest_ignores_authelia_headers(client, live, ingest_token, jpeg):
+def test_ingest_ignores_proxy_headers(client, live, ingest_token, jpeg):
     response = client.post(
         "/api/ingest/photo",
         files={"image": ("a.jpg", jpeg(), "image/jpeg")},

@@ -6,8 +6,13 @@ uid := $(shell id -u)
 gid := $(shell id -g)
 
 PROJECT_NAME := blog
-REMOTE_SSH ?= faradox@breathdance.net
-REMOTE_APP_DIR ?= /home/faradox/breathdance/websites/blog
+
+# Untracked local settings, e.g. the deploy target:
+#   REMOTE_SSH ?= user@example.com
+#   REMOTE_APP_DIR ?= /srv/flow
+-include local.mk
+REMOTE_SSH ?=
+REMOTE_APP_DIR ?=
 
 build:
 	@echo "Building blog image..."
@@ -37,6 +42,10 @@ stop:
 	@docker compose -p $(PROJECT_NAME) down
 
 deploy:
+	@if [ -z "$(REMOTE_SSH)" ] || [ -z "$(REMOTE_APP_DIR)" ]; then \
+		echo "deploy needs REMOTE_SSH and REMOTE_APP_DIR (set them in local.mk)"; \
+		exit 1; \
+	fi
 	@ssh $(REMOTE_SSH) "source /etc/profile && cd $(REMOTE_APP_DIR) && $(MAKE) build && $(MAKE) run"
 
 help:
@@ -58,5 +67,5 @@ help:
 	@echo ''
 	@echo 'Maintenance Commands:'
 	@echo '  stop                - Stop the blog container'
-	@echo '  deploy              - Deploy to production'
+	@echo '  deploy              - Build and run on REMOTE_SSH (set in local.mk)'
 	@echo '===================='
